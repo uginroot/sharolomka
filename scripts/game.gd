@@ -5,6 +5,7 @@ extends Node2D
 const Maps = preload("res://scripts/maps.gd")
 const BallScript = preload("res://scripts/ball.gd")
 const ChunkScript = preload("res://scripts/chunk.gd")
+const Icons = preload("res://scripts/icons.gd")
 
 const CELL := 40.0               # клетка в мировых единицах
 const INV := 1.0 / 40.0
@@ -90,11 +91,8 @@ var field_root: Node2D
 var overlay: Node2D
 var dirty := {}
 var lod := 0                     # 0 — с цифрами, 1 — «свет», 2 — грубо, по текстуре на кусок
-var mm: MultiMesh
-var mm_buf := PackedFloat32Array()
-var mm_cap := 0
-var mm_count := -1
-var dot_tex: ImageTexture
+var ball_layer: Node2D
+var ball_tex: ImageTexture
 
 # ---- камера и ввод
 var cam: Camera2D
@@ -109,6 +107,7 @@ var pinch := false
 var pinch_dist := 0.0
 var pinch_mid := Vector2.ZERO
 var mouse_pan := false
+var aim_before := 0.0
 
 # ---- интерфейс
 var ui_root: Control
@@ -157,7 +156,7 @@ func _ready() -> void:
 	st_dmg.resize(GameData.TYPE_ORDER.size())
 	st_lvl.resize(GameData.TYPE_ORDER.size())
 	st_sup.resize(GameData.TYPE_ORDER.size())
-	dot_tex = _circle_texture(32, Color.WHITE)
+	ball_tex = Icons.ball(64)
 
 	W = int(map["w"])
 	H = int(map["h"])
@@ -180,16 +179,10 @@ func _ready() -> void:
 
 	field_root = Node2D.new()
 	add_child(field_root)
-	mm = MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_2D
-	mm.use_colors = true
-	var q := QuadMesh.new()
-	q.size = Vector2(1, 1)
-	mm.mesh = q
-	var mmi := MultiMeshInstance2D.new()
-	mmi.multimesh = mm
-	mmi.texture = dot_tex
-	add_child(mmi)
+	# шарики: одна текстура на всех — Godot склеивает их в один вызов отрисовки
+	ball_layer = Node2D.new()
+	add_child(ball_layer)
+	ball_layer.draw.connect(_draw_balls)
 	overlay = Node2D.new()
 	add_child(overlay)
 	overlay.draw.connect(_draw_overlay)
@@ -576,6 +569,8 @@ func _load_state() -> float:
 	for ck in ch:
 		var cc = _gen_chunk(int(ck), ch[ck])
 		chunks[int(ck)] = cc
+		if cc.vis.count(1) > 0:
+			_ensure_node(int(ck))
 		for li in CS * CS:
 			if cc.vis[li] == 1:
 				var x := (int(ck) % cw) * CS + (li & 31)
@@ -731,7 +726,7 @@ func _process(delta: float) -> void:
 	if overlay_dirty:
 		overlay_dirty = false
 		overlay.queue_redraw()
-	_update_balls_mesh()
+	ball_layer.queue_redraw()
 
 	if toast_t > 0.0:
 		toast_t -= delta
@@ -1155,47 +1150,12 @@ func _redraw_dirty() -> void:
 				break
 
 
-func _circle_texture(sz: int, col: Color) -> ImageTexture:
-	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
-	var h := sz * 0.5
-	for y in sz:
-		for x in sz:
-			var d := Vector2(x + 0.5 - h, y + 0.5 - h).length()
-			img.set_pixel(x, y, Color(col.r, col.g, col.b, clampf(h - 0.5 - d, 0.0, 1.0)))
-	return ImageTexture.create_from_image(img)
-
-
-func _update_balls_mesh() -> void:
-	var n := balls.size()
-	if n != mm_count:
-		if n > mm_cap:
-			mm_cap = maxi(32, mm_cap * 2)
-			while mm_cap < n:
-				mm_cap *= 2
-			mm.instance_count = mm_cap
-			mm_buf.resize(mm_cap * 12)
-			mm_buf.fill(0.0)
-		var min_d := 7.0 / zoom
-		for k in n:
-			var b = balls[k]
-			var o: int = k * 12
-			var dd: float = maxf(b.radius * 2.0, min_d)
-			var col: Color = colors[b.type]
-			mm_buf[o] = dd
-			mm_buf[o + 1] = 0.0
-			mm_buf[o + 4] = 0.0
-			mm_buf[o + 5] = dd
-			mm_buf[o + 8] = col.r
-			mm_buf[o + 9] = col.g
-			mm_buf[o + 10] = col.b
-			mm_buf[o + 11] = 1.0
-		mm.visible_instance_count = n
-		mm_count = n
-	for k in n:
-		var p: Vector2 = balls[k].pos
-		mm_buf[k * 12 + 3] = p.x
-		mm_buf[k * 12 + 7] = p.y
-	mm.buffer = mm_buf
+func _draw_balls() -> void:
+	# на экране шарик не меньше 11 пикселей, иначе его не видно при отдалении
+	var min_d := 11.0 / zoom
+	for b in balls:
+		var dd: float = maxf(b.radius * 2.6, min_d)
+		ball_layer.draw_texture_rect(ball_tex, Rect2(b.pos.x - dd * 0.5, b.pos.y - dd * 0.5, dd, dd), false, colors[b.type])
 
 
 func _hp_color(h: int) -> Color:
@@ -1279,7 +1239,7 @@ func _draw_chunk(ck: int) -> void:
 	if not detail:
 		return
 	# цифры — вдвое крупным шрифтом в масштабе 0.5, чтобы были чёткими при приближении
-	var font := ThemeDB.fallback_font
+	var font: Font = GameData.font
 	n.draw_set_transform(Vector2.ZERO, 0.0, Vector2(0.5, 0.5))
 	for li in CS * CS:
 		if kind[li] != 1 or vis[li] == 0:
@@ -1318,7 +1278,7 @@ func _draw_overlay() -> void:
 		overlay.draw_line(start_pos + dir * k, start_pos + dir * minf(k + len * 0.06, len), Color(1, 1, 1, 0.7), w)
 		k += len * 0.12
 	overlay.draw_circle(start_pos, maxf(9.0, 6.0 / zoom), Color(1.0, 0.85, 0.2))
-	var font := ThemeDB.fallback_font
+	var font: Font = GameData.font_bold
 	var fs := int(clampf(26.0 / zoom, 26.0, 4000.0))
 	for p in popups:
 		overlay.draw_string(font, p["pos"] - Vector2(fs * 2, 0), p["text"], HORIZONTAL_ALIGNMENT_CENTER, fs * 4, fs,
@@ -1347,7 +1307,7 @@ func _update_zoom_limits() -> void:
 	var vs := get_viewport_rect().size
 	var avail := Vector2(vs.x - 16.0, vs.y - top_h - bottom_h - 16.0)
 	var er := _explored_rect()
-	zoom_min = minf(minf(avail.x / er.size.x, avail.y / er.size.y), 36.0 / CELL)
+	zoom_min = minf(minf(avail.x / er.size.x, avail.y / er.size.y), 30.0 / CELL)
 	zoom_max = 2.5
 	if zoom < zoom_min:
 		_set_zoom(zoom_min, vs * 0.5)
@@ -1364,7 +1324,6 @@ func _set_zoom(z: float, anchor: Vector2) -> void:
 	if nl != lod:
 		lod = nl
 		_mark_all()
-	mm_count = -1
 	overlay_dirty = true
 
 
@@ -1397,8 +1356,13 @@ func _unhandled_input(e: InputEvent) -> void:
 				return
 			touches[e.index] = e.position
 			if touches.size() == 1 and not pinch:
+				aim_before = aim_angle
 				_aim_at(e.position)
 			elif touches.size() >= 2:
+				if not pinch:
+					# второй палец — это щипок, а не прицел: возвращаем прицел как был
+					aim_angle = aim_before
+					overlay_dirty = true
 				pinch = true
 				_pinch_reset()
 		else:
@@ -1579,8 +1543,13 @@ func _to_menu() -> void:
 
 # ================================================================ интерфейс
 
+var ic_coin: ImageTexture
+var ic_gem: ImageTexture
+var prog_bar: ProgressBar
+
+
 func _safe_margins() -> Array:
-	# отступы от вырезов, скруглений и системных полос + запас, чтобы кнопки не прижимались к краю
+	# отступы от выреза камеры, скруглений и системных полос + запас от края
 	var l := 0.0
 	var t := 0.0
 	var r := 0.0
@@ -1594,28 +1563,7 @@ func _safe_margins() -> Array:
 			t = safe.position.y * k.y
 			r = maxf(0.0, (win.x - safe.end.x) * k.x)
 			b = maxf(0.0, (win.y - safe.end.y) * k.y)
-	return [l + 22.0, t + 12.0, r + 22.0, b + 22.0]
-
-
-func _panel_style(alpha: float) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.08, 0.09, 0.13, alpha)
-	return sb
-
-
-func _button(text: String, h: float = 56.0) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size.y = h
-	return b
-
-
-func _small_label(text: String = "") -> Label:
-	var l := Label.new()
-	l.text = text
-	l.add_theme_font_size_override("font_size", 17)
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	return l
+	return [l + 20.0, t + 12.0, r + 20.0, b + 20.0]
 
 
 func _margin(m: MarginContainer, v: Array) -> void:
@@ -1625,52 +1573,109 @@ func _margin(m: MarginContainer, v: Array) -> void:
 	m.add_theme_constant_override("margin_bottom", int(v[3]))
 
 
+func _button(text: String, variation: String = "", h: float = 58.0, icon: Texture2D = null) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size.y = h
+	if variation != "":
+		b.theme_type_variation = variation
+	if icon != null:
+		b.icon = icon
+		b.expand_icon = false
+	return b
+
+
+func _label(text: String = "", variation: String = "") -> Label:
+	var l := Label.new()
+	l.text = text
+	if variation != "":
+		l.theme_type_variation = variation
+	return l
+
+
+func _icon_rect(tex: Texture2D, sz: float) -> TextureRect:
+	var r := TextureRect.new()
+	r.texture = tex
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	r.custom_minimum_size = Vector2(sz, sz)
+	r.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return r
+
+
+## «Пилюля» со значком и числом — для рублей и U.
+func _pill(tex: Texture2D, color: Color) -> Label:
+	var p := PanelContainer.new()
+	p.theme_type_variation = "Pill"
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 6)
+	p.add_child(h)
+	h.add_child(_icon_rect(tex, 26))
+	var l := Label.new()
+	l.add_theme_font_override("font", GameData.font_bold)
+	l.add_theme_color_override("font_color", color)
+	h.add_child(l)
+	return l
+
+
 func _build_ui() -> void:
+	ic_coin = Icons.coin(40)
+	ic_gem = Icons.gem(40)
 	var cl := CanvasLayer.new()
 	add_child(cl)
 	ui_root = Control.new()
 	ui_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui_root.theme = GameData.make_theme()
+	ui_root.theme = GameData.make_theme()   # CanvasLayer не передаёт тему от окна — задаём явно
 	cl.add_child(ui_root)
 
-	# --- верхняя полоса: меню, деньги, прогресс, режим угла
+	# --- верхняя полоса
 	top_bar = PanelContainer.new()
-	top_bar.add_theme_stylebox_override("panel", _panel_style(0.75))
 	top_bar.anchor_right = 1.0
 	ui_root.add_child(top_bar)
 	top_margin = MarginContainer.new()
 	top_bar.add_child(top_margin)
+	var tv := VBoxContainer.new()
+	tv.add_theme_constant_override("separation", 6)
+	top_margin.add_child(tv)
 	var tr := HBoxContainer.new()
-	tr.add_theme_constant_override("separation", 10)
-	top_margin.add_child(tr)
-	var bmenu := _button("Меню", 52)
+	tr.add_theme_constant_override("separation", 8)
+	tv.add_child(tr)
+	var bmenu := _button("", "", 52, Icons.menu(40))
+	bmenu.custom_minimum_size.x = 56
+	bmenu.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	bmenu.pressed.connect(_to_menu)
 	tr.add_child(bmenu)
-	lbl_rub = Label.new()
-	lbl_u = Label.new()
-	lbl_prog = Label.new()
-	for l in [lbl_rub, lbl_u, lbl_prog]:
-		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		tr.add_child(l)
-	btn_snap = _button("", 52)
+	lbl_rub = _pill(ic_coin, GameData.C_GOLD)
+	tr.add_child(lbl_rub.get_parent().get_parent())
+	lbl_u = _pill(ic_gem, GameData.C_GEM)
+	tr.add_child(lbl_u.get_parent().get_parent())
+	var pv := VBoxContainer.new()
+	pv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pv.alignment = BoxContainer.ALIGNMENT_CENTER
+	pv.add_theme_constant_override("separation", 2)
+	tr.add_child(pv)
+	lbl_prog = _label("", "Muted")
+	lbl_prog.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pv.add_child(lbl_prog)
+	prog_bar = ProgressBar.new()
+	prog_bar.show_percentage = false
+	prog_bar.custom_minimum_size.y = 10
+	prog_bar.max_value = 1.0
+	pv.add_child(prog_bar)
+	btn_snap = _button("", "", 52, Icons.angle(40))
 	btn_snap.pressed.connect(_cycle_snap)
 	tr.add_child(btn_snap)
-	top_bar.resized.connect(_on_bars_resized)
-	warp_label = Label.new()
+	warp_label = _label("")
 	warp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	warp_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	warp_label.add_theme_color_override("font_color", GameData.C_GOLD)
+	warp_label.add_theme_font_size_override("font_size", 18)
 	warp_label.visible = false
-	var tv := VBoxContainer.new()
-	top_margin.remove_child(tr)
-	top_margin.add_child(tv)
-	tv.add_child(tr)
 	tv.add_child(warp_label)
+	top_bar.resized.connect(_on_bars_resized)
 
 	# --- нижняя панель: выбор шара, сброс, прокачка
 	bottom_bar = PanelContainer.new()
-	bottom_bar.add_theme_stylebox_override("panel", _panel_style(0.75))
 	bottom_bar.anchor_top = 1.0
 	bottom_bar.anchor_bottom = 1.0
 	bottom_bar.anchor_right = 1.0
@@ -1687,86 +1692,90 @@ func _build_ui() -> void:
 	var br := HBoxContainer.new()
 	br.add_theme_constant_override("separation", 10)
 	bv.add_child(br)
-	btn_reset = _button("Сброс")
+	btn_reset = _button("Сброс", "", 60, Icons.refresh(40))
 	btn_reset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn_reset.pressed.connect(_reset_stuck)
 	br.add_child(btn_reset)
-	var bup := _button("Прокачка")
+	var bup := _button("Прокачка", "AccentButton", 60, Icons.arrow_up(40))
 	bup.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bup.pressed.connect(_show_upgrades.bind(true))
 	br.add_child(bup)
 	bottom_bar.resized.connect(_on_bars_resized)
 
-	# --- окно прокачки: полупрозрачное, игра под ним продолжается
+	# --- окно прокачки: полупрозрачное, игра под ним идёт
 	upg = Control.new()
 	upg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	upg.visible = false
 	ui_root.add_child(upg)
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.35)
+	dim.color = Color(0, 0, 0, 0.3)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	upg.add_child(dim)
 	upg_margin = MarginContainer.new()
 	upg_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	upg.add_child(upg_margin)
 	var up := PanelContainer.new()
-	var ups := _panel_style(0.82)
-	ups.set_corner_radius_all(16)
+	var ups := StyleBoxFlat.new()
+	ups.bg_color = Color(0.08, 0.09, 0.14, 0.86)
+	ups.set_corner_radius_all(22)
+	ups.border_color = Color(1, 1, 1, 0.08)
+	ups.set_border_width_all(1)
 	ups.content_margin_left = 14
 	ups.content_margin_right = 14
-	ups.content_margin_top = 12
-	ups.content_margin_bottom = 12
+	ups.content_margin_top = 14
+	ups.content_margin_bottom = 14
 	up.add_theme_stylebox_override("panel", ups)
 	upg_margin.add_child(up)
 	var uv := VBoxContainer.new()
-	uv.add_theme_constant_override("separation", 10)
+	uv.add_theme_constant_override("separation", 12)
 	up.add_child(uv)
 	var uh := HBoxContainer.new()
+	uh.add_theme_constant_override("separation", 8)
 	uv.add_child(uh)
-	upg_rub = Label.new()
-	upg_u = Label.new()
-	for l in [upg_rub, upg_u]:
-		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		uh.add_child(l)
-	var bclose := _button("Закрыть", 52)
-	bclose.pressed.connect(_show_upgrades.bind(false))
-	uh.add_child(bclose)
+	var ut := _label("Прокачка", "Title")
+	ut.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	uh.add_child(ut)
+	upg_rub = _pill(ic_coin, GameData.C_GOLD)
+	uh.add_child(upg_rub.get_parent().get_parent())
+	upg_u = _pill(ic_gem, GameData.C_GEM)
+	uh.add_child(upg_u.get_parent().get_parent())
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	uv.add_child(tabs)
-	var sc1 := ScrollContainer.new()
-	sc1.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	tabs.add_child(sc1)
-	shop_box = VBoxContainer.new()
-	shop_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sc1.add_child(shop_box)
-	var sc2 := ScrollContainer.new()
-	sc2.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	tabs.add_child(sc2)
-	perk_box = VBoxContainer.new()
-	perk_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sc2.add_child(perk_box)
-	tabs.set_tab_title(0, "Шарики (рубли)")
-	tabs.set_tab_title(1, "Перки (U)")
+	for k in 2:
+		var sc := ScrollContainer.new()
+		sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		tabs.add_child(sc)
+		var m := MarginContainer.new()
+		m.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		m.add_theme_constant_override("margin_top", 10)
+		m.add_theme_constant_override("margin_right", 6)
+		sc.add_child(m)
+		var vb := VBoxContainer.new()
+		vb.add_theme_constant_override("separation", 12)
+		m.add_child(vb)
+		if k == 0:
+			shop_box = vb
+		else:
+			perk_box = vb
+	tabs.set_tab_title(0, "  Шарики  ")
+	tabs.set_tab_title(1, "  Перки  ")
+	var bclose := _button("Вернуться к игре", "AccentButton", 60)
+	bclose.pressed.connect(_show_upgrades.bind(false))
+	uv.add_child(bclose)
 
 	# --- всплывающее сообщение
 	toast = PanelContainer.new()
-	var ts := _panel_style(0.9)
-	ts.set_corner_radius_all(14)
-	ts.content_margin_left = 18
-	ts.content_margin_right = 18
-	ts.content_margin_top = 12
-	ts.content_margin_bottom = 12
-	toast.add_theme_stylebox_override("panel", ts)
+	toast.theme_type_variation = "Card"
 	toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	toast.anchor_left = 0.5
 	toast.anchor_right = 0.5
-	toast.anchor_top = 0.3
-	toast.anchor_bottom = 0.3
+	toast.anchor_top = 0.28
+	toast.anchor_bottom = 0.28
 	toast.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	toast.visible = false
 	ui_root.add_child(toast)
-	toast_label = Label.new()
+	toast_label = _label("")
 	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	toast.add_child(toast_label)
 
@@ -1775,9 +1784,9 @@ func _build_ui() -> void:
 
 func _layout() -> void:
 	var m := _safe_margins()
-	_margin(top_margin, [m[0], m[1], m[2], 8])
+	_margin(top_margin, [m[0], m[1], m[2], 10])
 	_margin(bottom_margin, [m[0], 12, m[2], m[3]])
-	_margin(upg_margin, [m[0], m[1] + 8.0, m[2], m[3]])
+	_margin(upg_margin, [m[0] - 8.0, m[1] + 6.0, m[2] - 8.0, m[3]])
 	_on_bars_resized()
 
 
@@ -1789,9 +1798,8 @@ func _on_bars_resized() -> void:
 	_update_zoom_limits()
 	if not cam_ready and top_h > 0.0 and bottom_h > 0.0:
 		cam_ready = true
-		# стартовый масштаб: клетка ~36 px, но не меньше «вся карта на экране»
-		cam.position = start_pos
-		_set_zoom(maxf(zoom_min, 36.0 / CELL), get_viewport_rect().size * 0.5)
+		cam.position = start_pos + Vector2(0, -CELL * 3.0)
+		_set_zoom(52.0 / CELL, get_viewport_rect().size * 0.5)
 	else:
 		_set_zoom(zoom, get_viewport_rect().size * 0.5)
 
@@ -1810,16 +1818,34 @@ func _show_toast(text: String) -> void:
 	toast_t = 5.0
 
 
-func _col(parent: HBoxContainer, caption: String, cb: Callable) -> Dictionary:
+## Кнопка с ценой: подпись сверху, цена со значком монеты/камня.
+func _price_btn(parent: HBoxContainer, caption: String, icon: Texture2D, cb: Callable) -> Dictionary:
 	var v := VBoxContainer.new()
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 4)
 	parent.add_child(v)
-	var l := _small_label(caption)
+	var l := _label(caption, "Muted")
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(l)
-	var b := _button("")
+	var b := _button("", "", 54, icon)
 	b.pressed.connect(cb)
 	v.add_child(b)
 	return {"label": l, "button": b}
+
+
+func _card_head(parent: VBoxContainer, t: String, locked: bool) -> Label:
+	var def: Dictionary = GameData.TYPES[t]
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	parent.add_child(h)
+	h.add_child(_icon_rect(Icons.dot(def["color"], 44) if not locked else Icons.lock(40), 32))
+	var n := _label(def["name"], "Title")
+	h.add_child(n)
+	var extra := _label("", "Muted")
+	extra.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	extra.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	h.add_child(extra)
+	return extra
 
 
 func _rebuild_rows() -> void:
@@ -1835,121 +1861,118 @@ func _rebuild_rows() -> void:
 
 	for t in GameData.TYPE_ORDER:
 		var def: Dictionary = GameData.TYPES[t]
+		var unlocked: bool = GameData.unlocked[t]
 
 		# --- фишка выбора шара на главном экране
-		if GameData.unlocked[t]:
-			var chip := _button("", 56)
+		if unlocked:
+			var chip := _button("", "ChipButton", 58, Icons.dot(def["color"], 44))
 			chip.toggle_mode = true
 			chip.button_group = chip_group
-			chip.icon = _circle_texture(26, def["color"])
 			chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			chip.button_pressed = (t == selected)
 			chip.pressed.connect(_select.bind(t))
 			chips_box.add_child(chip)
 			chips[t] = chip
 
-		# --- магазин за рубли
-		var box := VBoxContainer.new()
-		shop_box.add_child(box)
-		var head := HBoxContainer.new()
-		box.add_child(head)
-		var sw := TextureRect.new()
-		sw.texture = _circle_texture(22, def["color"])
-		sw.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
-		head.add_child(sw)
-		var name_l := Label.new()
-		name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		head.add_child(name_l)
-		if GameData.unlocked[t]:
+		# --- карточка магазина
+		var card := PanelContainer.new()
+		card.theme_type_variation = "Card"
+		shop_box.add_child(card)
+		var cv := VBoxContainer.new()
+		cv.add_theme_constant_override("separation", 10)
+		card.add_child(cv)
+		var extra := _card_head(cv, t, not unlocked)
+		if unlocked:
 			var row := HBoxContainer.new()
 			row.add_theme_constant_override("separation", 8)
-			box.add_child(row)
+			cv.add_child(row)
 			shop_refs[t] = {
-				"name": name_l,
-				"buy": _col(row, "Купить шар", _buy_ball.bind(t)),
-				"dmg": _col(row, "Урон", _buy_dmg.bind(t)),
-				"spd": _col(row, "Скорость", _buy_spd.bind(t)),
+				"extra": extra,
+				"buy": _price_btn(row, "Новый шар", ic_coin, _buy_ball.bind(t)),
+				"dmg": _price_btn(row, "Урон", ic_coin, _buy_dmg.bind(t)),
+				"spd": _price_btn(row, "Скорость", ic_coin, _buy_spd.bind(t)),
 			}
 		else:
-			name_l.text = "%s — закрыт (вкладка «Перки»)" % def["name"]
-			name_l.modulate = Color(1, 1, 1, 0.5)
-		shop_box.add_child(HSeparator.new())
+			card.modulate = Color(1, 1, 1, 0.6)
+			extra.text = "открывается во вкладке «Перки»"
 
-		# --- прокачка за U
-		var pb := VBoxContainer.new()
-		perk_box.add_child(pb)
-		var pl := Label.new()
-		pl.text = def["name"]
-		pl.add_theme_color_override("font_color", def["color"])
-		pb.add_child(pl)
-		var desc := Label.new()
-		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		desc.add_theme_font_size_override("font_size", 17)
-		desc.text = "Перк «%s»: %s\nСупер «%s»: %s" % [def["perk"], def["perk_desc"], def["super"], def["super_desc"]]
-		pb.add_child(desc)
+		# --- карточка перков
+		var pc := PanelContainer.new()
+		pc.theme_type_variation = "Card"
+		perk_box.add_child(pc)
+		var pv := VBoxContainer.new()
+		pv.add_theme_constant_override("separation", 8)
+		pc.add_child(pv)
+		_card_head(pv, t, not unlocked)
+		var d1 := _label("«%s» — %s" % [def["perk"], def["perk_desc"]], "Muted")
+		d1.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		pv.add_child(d1)
+		var d2 := _label("Супер «%s» — %s" % [def["super"], def["super_desc"]], "Muted")
+		d2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		pv.add_child(d2)
 		var prow := HBoxContainer.new()
 		prow.add_theme_constant_override("separation", 8)
-		pb.add_child(prow)
-		if GameData.unlocked[t]:
-			var perk_btn := _button("")
+		pv.add_child(prow)
+		if unlocked:
+			var perk_btn := _button("", "", 54, ic_gem)
 			perk_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			perk_btn.pressed.connect(_perk_up.bind(t))
 			prow.add_child(perk_btn)
-			var sup_btn := _button("")
+			var sup_btn := _button("", "", 54, ic_gem)
 			sup_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			sup_btn.pressed.connect(_super_up.bind(t))
 			prow.add_child(sup_btn)
 			perk_refs[t] = {"perk": perk_btn, "super": sup_btn}
 		else:
-			var ub := _button("")
+			var ub := _button("", "AccentButton", 54, ic_gem)
 			ub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			ub.pressed.connect(_unlock.bind(t))
 			prow.add_child(ub)
 			perk_refs[t] = {"unlock": ub}
-		perk_box.add_child(HSeparator.new())
 	_refresh_ui()
 
 
 func _refresh_ui() -> void:
 	if lbl_rub == null:
 		return
-	lbl_rub.text = "%s р" % GameData.fmt(rubles)
-	lbl_u.text = "U %d" % GameData.u
+	lbl_rub.text = GameData.fmt(rubles)
+	lbl_u.text = str(GameData.u)
+	var frac := float(destroyed) / maxf(1.0, float(goal))
+	prog_bar.value = minf(1.0, frac)
 	if track_all:
-		lbl_prog.text = "%d%%" % int(100.0 * destroyed / maxi(1, total))
+		lbl_prog.text = "Разбито %d%%" % int(100.0 * frac)
 	elif goal_done:
-		lbl_prog.text = GameData.fmt(destroyed)
+		lbl_prog.text = "Разбито %s" % GameData.fmt(destroyed)
 	else:
-		lbl_prog.text = "%s/%s" % [GameData.fmt(destroyed), GameData.fmt(goal)]
+		lbl_prog.text = "%s из %s" % [GameData.fmt(destroyed), GameData.fmt(goal)]
+	btn_snap.text = ["любой", "45°", "90°"][snap_mode]
 	if catchup > 0.0:
 		var sec := int(catchup)
-		warp_label.text = "Перемотка пропущенного времени: %d:%02d:%02d" % [sec / 3600, (sec / 60) % 60, sec % 60]
+		@warning_ignore("integer_division")
+		warp_label.text = "Перемотка пропущенного времени · осталось %d:%02d:%02d" % [sec / 3600, (sec / 60) % 60, sec % 60]
 		warp_label.visible = true
 	elif warp_label.visible:
 		warp_label.visible = false
-	btn_snap.text = ["Угол: любой", "Угол: 45°", "Угол: 90°"][snap_mode]
 
 	for t in chips:
 		chips[t].text = "×%d" % counts[t]
 	var cd: float = reset_cd[selected]
-	var tname: String = GameData.TYPES[selected]["name"]
-	btn_reset.text = "Сброс: %s" % tname if cd <= 0.0 else "%s: %d с" % [tname, int(ceil(cd))]
+	btn_reset.text = "Сброс" if cd <= 0.0 else "Сброс · %d с" % int(ceil(cd))
 	btn_reset.disabled = cd > 0.0 or int(counts[selected]) == 0
 
 	if not upg.visible:
 		return
-	upg_rub.text = "%s р" % GameData.fmt(rubles)
-	upg_u.text = "U: %d" % GameData.u
+	upg_rub.text = GameData.fmt(rubles)
+	upg_u.text = str(GameData.u)
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
-		r["name"].text = "%s ×%d" % [GameData.TYPES[t]["name"], counts[t]]
+		r["extra"].text = "шаров: %d · урон %d" % [counts[t], _damage_of(t)]
 		var bc := _ball_cost(t)
-		r["buy"]["button"].text = "%s р" % GameData.fmt(bc)
+		r["buy"]["button"].text = GameData.fmt(bc)
 		r["buy"]["button"].disabled = rubles < bc
 		var dc := _dmg_cost(t)
-		r["dmg"]["label"].text = "Урон %d → %d" % [_damage_of(t), _damage_of_next(t)]
-		r["dmg"]["button"].text = "%s р" % GameData.fmt(dc)
+		r["dmg"]["label"].text = "Урон → %d" % _damage_of_next(t)
+		r["dmg"]["button"].text = GameData.fmt(dc)
 		r["dmg"]["button"].disabled = rubles < dc
 		var sl := int(spd_lvl[t])
 		r["spd"]["label"].text = "Скорость %d/%d" % [sl, SPD_MAX]
@@ -1958,26 +1981,26 @@ func _refresh_ui() -> void:
 			r["spd"]["button"].disabled = true
 		else:
 			var scost := _spd_cost(t)
-			r["spd"]["button"].text = "%s р" % GameData.fmt(scost)
+			r["spd"]["button"].text = GameData.fmt(scost)
 			r["spd"]["button"].disabled = rubles < scost
 
 	for t in perk_refs:
 		var r: Dictionary = perk_refs[t]
 		if r.has("unlock"):
 			var uc := int(GameData.TYPES[t]["unlock_u"])
-			r["unlock"].text = "Открыть за %d U" % uc
+			r["unlock"].text = "Открыть · %d" % uc
 			r["unlock"].disabled = GameData.u < uc
 			continue
 		var lvl := int(GameData.perks[t])
 		if lvl >= GameData.PERK_MAX:
-			r["perk"].text = "Перк: макс."
+			r["perk"].text = "Перк %d/%d" % [lvl, GameData.PERK_MAX]
 			r["perk"].disabled = true
 		else:
-			r["perk"].text = "Перк %d/%d · %d U" % [lvl, GameData.PERK_MAX, lvl + 1]
+			r["perk"].text = "Перк %d/%d · %d" % [lvl, GameData.PERK_MAX, lvl + 1]
 			r["perk"].disabled = GameData.u < lvl + 1
 		if GameData.supers[t]:
-			r["super"].text = "Супер активен"
+			r["super"].text = "Супер есть"
 			r["super"].disabled = true
 		else:
-			r["super"].text = "Супер · %d U" % GameData.SUPER_COST
+			r["super"].text = "Супер · %d" % GameData.SUPER_COST
 			r["super"].disabled = GameData.u < GameData.SUPER_COST
