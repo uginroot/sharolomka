@@ -1,13 +1,16 @@
 extends RefCounted
-## Карты. Мир каждой карты 700×840. border — внешняя граница,
-## obstacles — непреодолимые препятствия в форме картинок.
+## Карты. border — внешняя граница (пустая = прямоугольник), obstacles — фигуры-картинки.
 
 const W := 700.0
 const H := 840.0
 
 
 static func get_maps() -> Array:
-	var frame := rect_poly(6, 6, W - 12, H - 12)
+	# Координаты задаются в «дизайн-пространстве» 700×840 и растягиваются на сетку карты.
+	# Препятствия превращаются в стенки из белых кубиков, внутри — полость с квадратами и вход.
+	var none := PackedVector2Array()
+	var house := PackedVector2Array([Vector2(230, 470), Vector2(350, 330), Vector2(470, 470),
+		Vector2(470, 620), Vector2(230, 620)])
 
 	var cat := ellipse_poly(Vector2(350, 390), 170, 170)
 	cat = union(cat, PackedVector2Array([Vector2(200, 335), Vector2(215, 165), Vector2(310, 235)]))
@@ -23,24 +26,31 @@ static func get_maps() -> Array:
 		PackedVector2Array([Vector2(520, 420), Vector2(694, 190), Vector2(694, 650)]))
 	var gill := subtract(ellipse_poly(Vector2(250, 420), 165, 165), ellipse_poly(Vector2(212, 420), 157, 157))
 
+	var sky_moon := subtract(ellipse_poly(Vector2(110, 110), 70, 70), ellipse_poly(Vector2(140, 85), 62, 62))
+
 	return [
-		{"id": "meadow", "name": "Лужайка", "cols": 14, "hp_base": 1.0, "hp_growth": 0.30,
-			"start": Vector2(350, 790), "aim": -70.0, "border": frame, "obstacles": []},
-		{"id": "heart", "name": "Сердце", "cols": 18, "hp_base": 1.5, "hp_growth": 0.35,
-			"start": Vector2(350, 790), "aim": -70.0, "border": frame,
+		{"id": "meadow", "name": "Лужайка", "cols": 16, "hp_base": 1.0, "hp_growth": 0.30,
+			"start": Vector2(350, 800), "aim": -70.0, "border": none, "obstacles": [house]},
+		{"id": "heart", "name": "Сердце", "cols": 22, "hp_base": 1.5, "hp_growth": 0.30,
+			"start": Vector2(350, 800), "aim": -70.0, "border": none,
 			"obstacles": [heart_poly(Vector2(350, 370), 190.0)]},
-		{"id": "tree", "name": "Ёлка", "cols": 20, "hp_base": 2.0, "hp_growth": 0.40,
-			"start": Vector2(350, 790), "aim": -70.0, "border": frame,
-			"obstacles": [tree_poly(), star_poly(Vector2(350, 105), 42, 18, 5)]},
-		{"id": "cat", "name": "Кот", "cols": 22, "hp_base": 2.5, "hp_growth": 0.42,
-			"start": Vector2(350, 790), "aim": -70.0, "border": frame,
-			"obstacles": [cat, ellipse_poly(Vector2(585, 690), 55, 55)]},
-		{"id": "mountains", "name": "Горы и луна", "cols": 24, "hp_base": 3.0, "hp_growth": 0.45,
-			"start": Vector2(350, 50), "aim": 110.0, "border": frame,
-			"obstacles": [mountains, moon]},
-		{"id": "fish", "name": "Рыба", "cols": 30, "hp_base": 3.5, "hp_growth": 0.50,
+		{"id": "tree", "name": "Ёлка", "cols": 28, "hp_base": 2.0, "hp_growth": 0.28,
+			"start": Vector2(350, 800), "aim": -70.0, "border": none,
+			"obstacles": [tree_poly(), star_poly(Vector2(350, 95), 50, 22, 5)]},
+		{"id": "cat", "name": "Кот", "cols": 34, "hp_base": 2.5, "hp_growth": 0.26,
+			"start": Vector2(350, 800), "aim": -70.0, "border": none,
+			"obstacles": [cat, ellipse_poly(Vector2(585, 690), 60, 60)]},
+		{"id": "mountains", "name": "Горы и луна", "cols": 40, "hp_base": 3.0, "hp_growth": 0.25,
+			"start": Vector2(350, 50), "aim": 110.0, "border": none, "obstacles": [mountains, moon]},
+		{"id": "fish", "name": "Рыба", "cols": 48, "hp_base": 3.5, "hp_growth": 0.24,
 			"start": Vector2(440, 640), "aim": -70.0, "border": fish,
-			"obstacles": [ellipse_poly(Vector2(150, 330), 28, 28), gill]},
+			"obstacles": [ellipse_poly(Vector2(150, 330), 34, 34), gill]},
+		{"id": "sky", "name": "Звёздная ночь", "cols": 56, "hp_base": 4.0, "hp_growth": 0.22,
+			"start": Vector2(350, 800), "aim": -70.0, "border": none,
+			"obstacles": [sky_moon,
+				star_poly(Vector2(470, 150), 95, 42, 5), star_poly(Vector2(200, 330), 85, 38, 5),
+				star_poly(Vector2(500, 420), 110, 48, 5), star_poly(Vector2(160, 600), 75, 34, 5),
+				star_poly(Vector2(560, 650), 70, 32, 5)]},
 	]
 
 
