@@ -123,7 +123,7 @@ func _fill() -> void:
 			status = "  — продолжить"
 		elif GameData.maps_done.has(mp["id"]):
 			status = "  — пройдена"
-		b.text = "%d. %s%s" % [i + 1, mp["name"], status]
+		b.text = "%d. %s  %d×%d%s" % [i + 1, mp["name"], mp["w"], mp["h"], status]
 		b.pressed.connect(_open.bind(i))
 		list.add_child(b)
 

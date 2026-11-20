@@ -1,57 +1,84 @@
 extends RefCounted
-## Карты. border — внешняя граница (пустая = прямоугольник), obstacles — фигуры-картинки.
+## Карты и картинки-шаблоны.
 
 const W := 700.0
 const H := 840.0
 
 
-static func get_maps() -> Array:
-	# Координаты задаются в «дизайн-пространстве» 700×840 и растягиваются на сетку карты.
-	# Препятствия превращаются в стенки из белых кубиков, внутри — полость с квадратами и вход.
-	var none := PackedVector2Array()
-	var house := PackedVector2Array([Vector2(230, 470), Vector2(350, 330), Vector2(470, 470),
-		Vector2(470, 620), Vector2(230, 620)])
-
+## Картинки-шаблоны: многоугольники в квадрате 0..1. Из них строятся стены из белых кубиков.
+static func templates() -> Dictionary:
 	var cat := ellipse_poly(Vector2(350, 390), 170, 170)
 	cat = union(cat, PackedVector2Array([Vector2(200, 335), Vector2(215, 165), Vector2(310, 235)]))
 	cat = union(cat, PackedVector2Array([Vector2(500, 335), Vector2(485, 165), Vector2(390, 235)]))
+	var fish := union(ellipse_poly(Vector2(320, 420), 280, 190, 64),
+		PackedVector2Array([Vector2(520, 420), Vector2(694, 250), Vector2(694, 590)]))
+	var cap := PackedVector2Array()
+	for k in 25:
+		var a := PI + PI * k / 24.0
+		cap.append(Vector2(0.5 + cos(a) * 0.5, 0.5 + sin(a) * 0.45))
+	var mushroom := union(cap, rect_poly(0.34, 0.4, 0.32, 0.6))
+	return {
+		"house": norm([PackedVector2Array([Vector2(0.1, 0.45), Vector2(0.5, 0.05), Vector2(0.9, 0.45),
+			Vector2(0.9, 0.95), Vector2(0.1, 0.95)])]),
+		"heart": norm([heart_poly(Vector2.ZERO, 17.0)]),
+		"star": norm([star_poly(Vector2.ZERO, 1.0, 0.5, 5)]),
+		"moon": norm([subtract(ellipse_poly(Vector2.ZERO, 1, 1), ellipse_poly(Vector2(0.5, -0.3), 0.78, 0.78))]),
+		"tree": norm([tree_poly(), star_poly(Vector2(350, 100), 55, 26, 5)]),
+		"cat": norm([cat]),
+		"fish": norm([fish]),
+		"yarn": norm([ellipse_poly(Vector2.ZERO, 1, 1)]),
+		"mushroom": norm([mushroom]),
+		"mountain": norm([PackedVector2Array([Vector2(0, 1), Vector2(0.18, 0.55), Vector2(0.3, 0.68),
+			Vector2(0.5, 0.08), Vector2(0.68, 0.5), Vector2(0.8, 0.38), Vector2(1, 1)])]),
+	}
 
-	var mountains := PackedVector2Array([
-		Vector2(6, 834), Vector2(6, 640), Vector2(90, 560), Vector2(150, 610),
-		Vector2(260, 450), Vector2(330, 540), Vector2(400, 480), Vector2(520, 600),
-		Vector2(600, 520), Vector2(694, 610), Vector2(694, 834)])
-	var moon := subtract(ellipse_poly(Vector2(560, 170), 70, 70), ellipse_poly(Vector2(595, 140), 62, 62))
 
-	var fish := union(ellipse_poly(Vector2(320, 420), 280, 300, 72),
-		PackedVector2Array([Vector2(520, 420), Vector2(694, 190), Vector2(694, 650)]))
-	var gill := subtract(ellipse_poly(Vector2(250, 420), 165, 165), ellipse_poly(Vector2(212, 420), 157, 157))
-
-	var sky_moon := subtract(ellipse_poly(Vector2(110, 110), 70, 70), ellipse_poly(Vector2(140, 85), 62, 62))
-
+## Карты растут от 20×24 до 10000×10000 клеток.
+## fixed — картинки в заданных местах; иначе картинки разбросаны по регионам region×region.
+## goal — сколько квадратов разбить, чтобы открыть следующую карту (0 — все).
+static func get_maps() -> Array:
+	var all := ["house", "heart", "star", "moon", "tree", "cat", "fish", "yarn", "mushroom", "mountain"]
 	return [
-		{"id": "meadow", "name": "Лужайка", "cols": 16, "hp_base": 1.0, "hp_growth": 0.30,
-			"start": Vector2(350, 800), "aim": -70.0, "border": none, "obstacles": [house]},
-		{"id": "heart", "name": "Сердце", "cols": 22, "hp_base": 1.5, "hp_growth": 0.30,
-			"start": Vector2(350, 800), "aim": -70.0, "border": none,
-			"obstacles": [heart_poly(Vector2(350, 370), 190.0)]},
-		{"id": "tree", "name": "Ёлка", "cols": 28, "hp_base": 2.0, "hp_growth": 0.28,
-			"start": Vector2(350, 800), "aim": -70.0, "border": none,
-			"obstacles": [tree_poly(), star_poly(Vector2(350, 95), 50, 22, 5)]},
-		{"id": "cat", "name": "Кот", "cols": 34, "hp_base": 2.5, "hp_growth": 0.26,
-			"start": Vector2(350, 800), "aim": -70.0, "border": none,
-			"obstacles": [cat, ellipse_poly(Vector2(585, 690), 60, 60)]},
-		{"id": "mountains", "name": "Горы и луна", "cols": 40, "hp_base": 3.0, "hp_growth": 0.25,
-			"start": Vector2(350, 50), "aim": 110.0, "border": none, "obstacles": [mountains, moon]},
-		{"id": "fish", "name": "Рыба", "cols": 48, "hp_base": 3.5, "hp_growth": 0.24,
-			"start": Vector2(440, 640), "aim": -70.0, "border": fish,
-			"obstacles": [ellipse_poly(Vector2(150, 330), 34, 34), gill]},
-		{"id": "sky", "name": "Звёздная ночь", "cols": 56, "hp_base": 4.0, "hp_growth": 0.22,
-			"start": Vector2(350, 800), "aim": -70.0, "border": none,
-			"obstacles": [sky_moon,
-				star_poly(Vector2(470, 150), 95, 42, 5), star_poly(Vector2(200, 330), 85, 38, 5),
-				star_poly(Vector2(500, 420), 110, 48, 5), star_poly(Vector2(160, 600), 75, 34, 5),
-				star_poly(Vector2(560, 650), 70, 32, 5)]},
+		{"id": "meadow", "name": "Лужайка", "w": 20, "h": 24, "start": Vector2i(10, 21), "aim": -70.0,
+			"hp_base": 1.0, "hp_growth": 0.30, "goal": 0, "fixed": [["house", Rect2i(4, 3, 12, 12)]]},
+		{"id": "heart", "name": "Сердце", "w": 40, "h": 48, "start": Vector2i(20, 45), "aim": -70.0,
+			"hp_base": 1.5, "hp_growth": 0.25, "goal": 0, "fixed": [["heart", Rect2i(6, 6, 28, 28)]]},
+		{"id": "garden", "name": "Сад", "w": 100, "h": 120, "start": Vector2i(50, 116), "aim": -70.0,
+			"hp_base": 2.0, "hp_growth": 0.12, "goal": 0, "region": 30, "density": 0.85,
+			"templates": ["tree", "house", "heart", "mushroom"]},
+		{"id": "yard", "name": "Кошачий двор", "w": 300, "h": 360, "start": Vector2i(150, 355), "aim": -70.0,
+			"hp_base": 2.5, "hp_growth": 0.06, "goal": 25000, "region": 40, "density": 0.75,
+			"templates": ["cat", "yarn", "fish", "house", "heart"]},
+		{"id": "mountains", "name": "Горы", "w": 1000, "h": 1200, "start": Vector2i(500, 1195), "aim": -70.0,
+			"hp_base": 3.0, "hp_growth": 0.03, "goal": 80000, "region": 48, "density": 0.7,
+			"templates": ["mountain", "moon", "star", "tree", "mushroom"]},
+		{"id": "ocean", "name": "Океан", "w": 3000, "h": 3600, "start": Vector2i(1500, 3595), "aim": -70.0,
+			"hp_base": 3.5, "hp_growth": 0.02, "goal": 200000, "region": 56, "density": 0.65,
+			"templates": ["fish", "star", "moon", "heart", "yarn"]},
+		{"id": "night", "name": "Звёздная ночь", "w": 10000, "h": 10000, "start": Vector2i(5000, 9995), "aim": -70.0,
+			"hp_base": 4.0, "hp_growth": 0.015, "goal": 500000, "region": 64, "density": 0.65,
+			"templates": all},
 	]
+
+
+## Вписывает набор многоугольников в квадрат 0..1 с сохранением пропорций.
+static func norm(polys: Array) -> Array:
+	var mn := Vector2(INF, INF)
+	var mx := Vector2(-INF, -INF)
+	for p in polys:
+		for v in p:
+			mn = mn.min(v)
+			mx = mx.max(v)
+	var sz := mx - mn
+	var s := 1.0 / maxf(sz.x, sz.y)
+	var off := (Vector2.ONE - sz * s) * 0.5
+	var out: Array = []
+	for p in polys:
+		var q := PackedVector2Array()
+		for v in p:
+			q.append((v - mn) * s + off)
+		out.append(q)
+	return out
 
 
 static func rect_poly(x: float, y: float, w: float, h: float) -> PackedVector2Array:

@@ -1,0 +1,13 @@
+extends RefCounted
+## Кусок мира 32×32 клетки. Создаётся, только когда до него добрались.
+
+var hp := PackedInt32Array()     # жизни квадратов
+var kind := PackedByteArray()    # 0 пусто, 1 квадрат, 2 стена, 3 за краем карты
+var vis := PackedByteArray()     # 1 — клетка видна (туман: только первый слой)
+var solid := 0                   # сколько квадратов и стен — для быстрого пролёта пустых кусков
+var changed := false             # отличается от сгенерированного — надо сохранять
+var blob_dirty := true
+var blob: Array = []
+var node: Node2D = null
+var tex: ImageTexture = null
+var tex_dirty := true

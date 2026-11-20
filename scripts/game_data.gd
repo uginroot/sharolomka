@@ -120,6 +120,11 @@ func reset_all() -> void:
 	var e := eco_mode
 	var k := keep_screen
 	_reset_defaults()
+	var dir := DirAccess.open("user://")
+	if dir:
+		for f in dir.get_files():
+			if f.begins_with("map_") and f.ends_with(".bin"):
+				dir.remove(f)
 	eco_mode = e
 	keep_screen = k
 	save_game()
