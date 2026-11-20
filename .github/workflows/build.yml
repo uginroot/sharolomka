@@ -1,0 +1,157 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3"
+  GODOT_STATUS: "stable"
+
+jobs:
+  export:
+    name: ${{ matrix.preset }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: Linux
+            file: build/linux/sharolomka.x86_64
+            artifact: sharolomka-linux
+          - preset: Windows
+            file: build/windows/Sharolomka.exe
+            artifact: sharolomka-windows
+          - preset: Android
+            file: build/android/sharolomka.apk
+            artifact: sharolomka-android
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot and templates
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-${{ env.GODOT_STATUS }}-v1
+
+      - name: Download Godot and templates
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          V="${GODOT_VERSION}-${GODOT_STATUS}"
+          BASE="https://github.com/godotengine/godot/releases/download/${V}"
+          mkdir -p ~/godot
+          curl -fsSL -o /tmp/godot.zip "${BASE}/Godot_v${V}_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          mv /tmp/godot/Godot_v${V}_linux.x86_64 ~/godot/godot
+          chmod +x ~/godot/godot
+          # Из ~1 ГБ шаблонов берём только нужные (~450 МБ), чтобы кэш был меньше
+          T=~/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}
+          mkdir -p "$T"
+          curl -fsSL -o /tmp/tpl.tpz "${BASE}/Godot_v${V}_export_templates.tpz"
+          unzip -j -q /tmp/tpl.tpz \
+            templates/version.txt \
+            templates/linux_debug.x86_64 templates/linux_release.x86_64 \
+            templates/windows_debug_x86_64.exe templates/windows_release_x86_64.exe \
+            templates/windows_debug_x86_64_console.exe templates/windows_release_x86_64_console.exe \
+            templates/android_debug.apk templates/android_release.apk \
+            -d "$T"
+          rm /tmp/tpl.tpz /tmp/godot.zip
+
+      - name: Set up Java (Android)
+        if: matrix.preset == 'Android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configure Android signing
+        if: matrix.preset == 'Android'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_USER: ${{ secrets.ANDROID_KEYSTORE_USER }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          # Debug-ключ нужен Godot всегда
+          keytool -genkeypair -v -keystore ~/debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US" >/dev/null 2>&1
+          mkdir -p ~/.config/godot
+          for f in editor_settings-4.3.tres editor_settings-4.tres; do
+            cat > ~/.config/godot/$f <<EOT
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$SDK"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOT
+          done
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > ~/release.keystore
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$HOME/release.keystore" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=$KEYSTORE_USER" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$KEYSTORE_PASS" >> "$GITHUB_ENV"
+            echo "EXPORT_MODE=release" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Секрет ANDROID_KEYSTORE_BASE64 не задан — собираю debug APK со случайным ключом. Обновлять такой APK поверх старого не получится."
+            echo "EXPORT_MODE=debug" >> "$GITHUB_ENV"
+          fi
+          # versionCode растёт с каждым запуском, иначе Android не даст обновиться
+          sed -i "s/^version\/code=.*/version\/code=${GITHUB_RUN_NUMBER}/" export_presets.cfg
+
+      - name: Version name from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: sed -i "s/^version\/name=.*/version\/name=\"${GITHUB_REF_NAME#v}\"/" export_presets.cfg
+
+      - name: Import project
+        run: ~/godot/godot --headless --path . --import || true
+
+      - name: Export ${{ matrix.preset }}
+        run: |
+          mkdir -p "$(dirname "${{ matrix.file }}")"
+          MODE="${EXPORT_MODE:-release}"
+          ~/godot/godot --headless --path . --export-${MODE} "${{ matrix.preset }}" "${{ matrix.file }}" 2>&1 | tee export.log
+          test -s "${{ matrix.file }}" || { echo "::error::Файл не создан"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.file }}
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: export
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Pack
+        run: |
+          cd dist
+          V="${GITHUB_REF_NAME}"
+          mv sharolomka-android/sharolomka.apk "sharolomka-${V}.apk"
+          zip -j "sharolomka-${V}-windows.zip" sharolomka-windows/Sharolomka.exe
+          chmod +x sharolomka-linux/sharolomka.x86_64
+          tar -czf "sharolomka-${V}-linux.tar.gz" -C sharolomka-linux sharolomka.x86_64
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.apk
+            dist/*.zip
+            dist/*.tar.gz
+          generate_release_notes: true

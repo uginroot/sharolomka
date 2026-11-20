@@ -1,0 +1,11 @@
+# Godot
+.godot/
+*.import.tmp
+# сборки
+build/
+*.apk
+*.aab
+# ключи подписи — никогда не коммитить
+*.keystore
+*.jks
+export_credentials.cfg
