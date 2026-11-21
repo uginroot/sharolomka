@@ -1334,18 +1334,15 @@ func _set_zoom(z: float, anchor: Vector2) -> void:
 	overlay_dirty = true
 
 
-## Камера ходит в пределах открытой части карты.
+## Центр поля (точка выстрела) может дойти до любого края открытой части карты при любом масштабе.
 func _clamp_cam() -> void:
 	var vs := get_viewport_rect().size
-	var er := _explored_rect()
-	var lo_x := er.position.x + (vs.x * 0.5 - 8.0) / zoom
-	var hi_x := er.end.x - (vs.x * 0.5 - 8.0) / zoom
-	var lo_y := er.position.y + (vs.y * 0.5 - top_h - 8.0) / zoom
-	var hi_y := er.end.y - (vs.y * 0.5 - bottom_h - 8.0) / zoom
-	var p := cam.position
-	p.x = (lo_x + hi_x) * 0.5 if lo_x > hi_x else clampf(p.x, lo_x, hi_x)
-	p.y = (lo_y + hi_y) * 0.5 if lo_y > hi_y else clampf(p.y, lo_y, hi_y)
-	cam.position = p
+	var off_y := ((top_h + vs.y - bottom_h) * 0.5 - vs.y * 0.5) / zoom
+	var a := Vector2(maxi(0, ex0 - 1), maxi(0, ey0 - 1)) * CELL
+	var b := Vector2(mini(W, ex1 + 2), mini(H, ey1 + 2)) * CELL
+	var c := cam.position + Vector2(0, off_y)
+	c = c.clamp(a, b)
+	cam.position = c - Vector2(0, off_y)
 
 
 # ================================================================ ввод
@@ -1896,6 +1893,9 @@ func _rebuild_rows() -> void:
 		cv.add_theme_constant_override("separation", 10)
 		card.add_child(cv)
 		var extra := _card_head(cv, t, not unlocked)
+		var sd := _label(def["desc"], "Muted")
+		sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		cv.add_child(sd)
 		if unlocked:
 			var row := HBoxContainer.new()
 			row.add_theme_constant_override("separation", 8)
@@ -1917,6 +1917,9 @@ func _rebuild_rows() -> void:
 		pv.add_theme_constant_override("separation", 8)
 		pc.add_child(pv)
 		_card_head(pv, t, not unlocked)
+		var d0 := _label(def["desc"], "Muted")
+		d0.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		pv.add_child(d0)
 		var d1 := _label("«%s» — %s" % [def["perk"], def["perk_desc"]], "Muted")
 		d1.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		pv.add_child(d1)
@@ -1974,13 +1977,20 @@ func _refresh_ui() -> void:
 	upg_u.text = str(GameData.u)
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
-		r["extra"].text = "шаров: %d · урон %d" % [counts[t], _damage_of(t)]
+		r["extra"].text = "шаров на карте: %d" % counts[t]
 		var dc := _dmg_cost(t)
-		r["dmg"]["label"].text = "Урон → %d" % _damage_of_next(t)
+		r["dmg"]["label"].text = "Урон %d → %d" % [_damage_of(t), _damage_of_next(t)]
 		r["dmg"]["button"].text = GameData.fmt(dc)
 		r["dmg"]["button"].disabled = rubles < dc
 		var sl := int(spd_lvl[t])
-		r["spd"]["label"].text = "Скорость %d/%d" % [sl, SPD_MAX]
+		var cps := _speed(t) / CELL
+		if sl >= SPD_MAX:
+			r["spd"]["label"].text = "Скорость %.1f кл/с" % cps
+		else:
+			spd_lvl[t] += 1
+			var nxt := _speed(t) / CELL
+			spd_lvl[t] -= 1
+			r["spd"]["label"].text = "Скорость %.1f → %.1f кл/с" % [cps, nxt]
 		if sl >= SPD_MAX:
 			r["spd"]["button"].text = "макс."
 			r["spd"]["button"].disabled = true
