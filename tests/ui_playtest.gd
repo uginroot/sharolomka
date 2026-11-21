@@ -224,6 +224,7 @@ func _run() -> void:
 	tabs.current_tab = 1
 	await _wait(0.3)
 	await _shot("perks")
+	check(g.mastery_btn != null and g.mastery_btn.is_visible_in_tree(), "в перках есть «Мастерство»")
 	check(await _tap("Вернуться к игре"), "кнопка «Вернуться к игре»")
 	check(not g.upg.visible, "окно прокачки закрылось")
 
@@ -289,6 +290,35 @@ func _run() -> void:
 	await _tap("Upgrades")
 	await _wait(0.4)
 	await _shot("upgrades_en")
+	# много уровней: меню прокручивается пальцем с кнопки «Играть» и не запускает уровень
+	GameData.maps_unlocked = 15
+	GameData.lang_choice = "ru"
+	GameData.apply_settings()
+	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+	await _wait(0.8)
+	var menu = get_tree().current_scene
+	await _shot("menu_endless")
+	var msc: ScrollContainer = menu.scroll
+	var mbar := msc.get_v_scroll_bar()
+	check(msc.scroll_vertical > 0, "меню само прокрутилось к текущему уровню")
+	msc.scroll_vertical = 0
+	await _wait(0.2)
+	var play_btn: Button = _find(menu, "Играть")
+	print("    меню: кнопка %s, содержимое %.0f, видно %.0f" % [play_btn != null, mbar.max_value, mbar.page])
+	check(play_btn != null and mbar.max_value > mbar.page + 1.0, "в меню 16 уровней и список длиннее экрана")
+	if play_btn != null and mbar.max_value > mbar.page + 1.0:
+		var mp: Vector2 = play_btn.get_global_rect().get_center()
+		_touch(mp, true)
+		await get_tree().process_frame
+		for k in 12:
+			_drag(mp - Vector2(0, 30 * (k + 1)), Vector2(0, -30))
+			await get_tree().process_frame
+		_touch(mp - Vector2(0, 360), false)
+		await _wait(0.5)
+		check(get_tree().current_scene.name == "MainMenu", "прокрутка меню не запустила уровень")
+		check(msc.scroll_vertical > 0, "меню прокручивается пальцем с кнопки «Играть»")
+	GameData.maps_unlocked = 1
+
 	# другие письменности: латиница с длинными словами, иероглифы, арабское (справа налево), деванагари
 	for code in ["de", "zh_CN", "ar", "hi", "ja"]:
 		GameData.lang_choice = code

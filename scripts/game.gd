@@ -6,6 +6,7 @@ const Maps = preload("res://scripts/maps.gd")
 const BallScript = preload("res://scripts/ball.gd")
 const ChunkScript = preload("res://scripts/chunk.gd")
 const Icons = preload("res://scripts/icons.gd")
+const TouchScroll = preload("res://scripts/touch_scroll.gd")
 
 const CELL := 40.0               # клетка в мировых единицах
 const INV := 1.0 / 40.0
@@ -101,6 +102,8 @@ var completed := false
 
 # ---- отрисовка
 var field_root: Node2D
+var floor_col := FLOOR           # цвет пола — у бесконечных уровней свой по теме
+var hue_shift := 0.0             # сдвиг оттенка квадратов по теме
 var overlay: Node2D
 var dirty := {}
 var redraw_t := 0.0
@@ -158,10 +161,6 @@ var perk_box: VBoxContainer
 var shop_refs := {}
 var perk_refs := {}
 var upg_tabs: TabContainer
-var tscroll_idx := -1           # палец, которым прокручивают окно прокачки
-var tscroll_start := Vector2.ZERO
-var tscroll_v0 := 0
-var tscroll_on := false
 var toast: PanelContainer
 var toast_label: Label
 var toast_t := 0.0
@@ -170,9 +169,10 @@ var toast_t := 0.0
 # ================================================================ запуск
 
 func _ready() -> void:
-	var maps := Maps.get_maps()
-	map_index = clampi(GameData.current_map, 0, maps.size() - 1)
-	map = maps[map_index]
+	map_index = maxi(0, GameData.current_map)
+	map = Maps.get_map(map_index)
+	floor_col = map.get("floor", FLOOR)
+	hue_shift = float(map.get("hue", 0.0))
 	templates = Maps.templates()
 	aim_angle = float(map["aim"])
 	for ti in GameData.TYPE_ORDER.size():
@@ -322,7 +322,7 @@ func _gen_chunk(ck: int, blob: Array):
 			if d2 < sc2:
 				continue
 			c.kind[li] = 1
-			c.hp[li] = int(ceil(hb * pow(1.0 + sqrt(d2) * hg, 1.6)))
+			c.hp[li] = int(minf(ceil(hb * pow(1.0 + sqrt(d2) * hg, 1.6)), 2.0e9))   # жизни хранятся в int32
 			if _hash3(x, y, seed_i + 13) % 10000 < GOLD_RATE:
 				c.gold[li] = 1
 			solid += 1
@@ -722,7 +722,7 @@ func _speed(t: String) -> float:
 ## (без них доход глохнет против экспоненциальных цен — симулятор баланса v0.16).
 func _damage_of(t: String) -> int:
 	var lv := int(dmg_lvl[t])
-	var d := float(GameData.TYPES[t]["damage"]) * (1 + lv) * pow(2.0, floori(lv / 10.0))
+	var d := float(GameData.TYPES[t]["damage"]) * (1 + lv) * pow(2.0, floori(lv / 10.0)) * GameData.mastery_mult()
 	if t == "pierce":
 		d *= 1.0 + 0.2 * int(GameData.perks[t])
 	return maxi(1, int(round(d)))
@@ -1291,7 +1291,7 @@ func _check_goal() -> void:
 		GameData.save_game()
 		var d := AcceptDialog.new()
 		d.title = tr("Победа!")
-		d.dialog_text = tr("Карта «%s» разбита полностью!") % tr(map["name"])
+		d.dialog_text = tr("Карта «%s» разбита полностью!") % Maps.title(map, tr)
 		d.ok_button_text = tr("В меню")
 		ui_root.add_child(d)
 		d.confirmed.connect(_to_menu)
@@ -1364,7 +1364,7 @@ func _draw_balls() -> void:
 
 func _hp_color(h: int) -> Color:
 	var lg := log(float(maxi(h, 1))) / log(10.0)
-	return Color.from_hsv(fposmod(0.33 - lg * 0.11, 1.0), 0.6, 0.92)
+	return Color.from_hsv(fposmod(0.33 - lg * 0.11 + hue_shift, 1.0), 0.6, 0.92)
 
 
 func _draw_chunk(ck: int) -> void:
@@ -1391,7 +1391,7 @@ func _draw_chunk(ck: int) -> void:
 			if seen and run < 0:
 				run = lx
 			elif not seen and run >= 0:
-				n.draw_rect(Rect2(run * CELL, ly * CELL, (lx - run) * CELL, CELL), FLOOR)
+				n.draw_rect(Rect2(run * CELL, ly * CELL, (lx - run) * CELL, CELL), floor_col)
 				if lod == 0:
 					# еле видная сетка — только вблизи и только на открытом полу
 					var gl := PackedVector2Array()
@@ -1473,7 +1473,7 @@ func _build_chunk_tex(c) -> void:
 		if c.vis[li] == 1:
 			match c.kind[li]:
 				0:
-					col = FLOOR
+					col = floor_col
 				1:
 					col = Color(1.0, 0.8, 0.2) if c.gold[li] == 1 else _hp_color(c.hp[li])
 				2:
@@ -1604,44 +1604,6 @@ func _over_ui(p: Vector2) -> bool:
 	if upg.visible:
 		return true
 	return top_bar.get_global_rect().has_point(p) or bottom_bar.get_global_rect().has_point(p)
-
-
-## Прокрутка окна прокачки пальцем, даже если палец лёг на кнопку: в Godot 4.3 кнопка захватывает
-## касание, и ScrollContainer его не получает (на экранах 16:9 «Перки» длиннее экрана).
-## Сдвиг по вертикали > 14 px — это прокрутка, и нажатие кнопки под пальцем отменяется.
-func _input(e: InputEvent) -> void:
-	if upg == null or not upg.visible:
-		return
-	var sc := upg_tabs.get_current_tab_control() as ScrollContainer
-	if sc == null:
-		return
-	if e is InputEventScreenTouch:
-		if e.pressed and tscroll_idx < 0 and sc.get_global_rect().has_point(e.position):
-			tscroll_idx = e.index
-			tscroll_start = e.position
-			tscroll_v0 = sc.scroll_vertical
-			tscroll_on = false
-		elif not e.pressed and e.index == tscroll_idx:
-			tscroll_idx = -1
-			if tscroll_on:
-				tscroll_on = false
-				get_viewport().set_input_as_handled()
-	elif e is InputEventScreenDrag and e.index == tscroll_idx:
-		var dy: float = e.position.y - tscroll_start.y
-		if not tscroll_on and absf(dy) > 14.0:
-			# отменяем нажатие кнопки: «отпускаем» мышь далеко за экраном — кнопка не сработает
-			var r := InputEventMouseButton.new()
-			r.button_index = MOUSE_BUTTON_LEFT
-			r.pressed = false
-			r.position = Vector2(-10000, -10000)
-			r.global_position = r.position
-			Input.parse_input_event(r)
-			tscroll_on = true
-		if tscroll_on:
-			sc.scroll_vertical = tscroll_v0 - int(dy)
-			get_viewport().set_input_as_handled()
-	elif tscroll_on and e is InputEventMouse and e.device == InputEvent.DEVICE_ID_EMULATION:
-		get_viewport().set_input_as_handled()   # эмулированная мышь во время прокрутки не трогает кнопки
 
 
 ## Один палец: сразу повёл — перемещение карты; нажал и подержал HOLD_TIME — прицел-рогатка
@@ -1959,6 +1921,17 @@ func _super_up(t: String) -> void:
 	_refresh_ui()
 
 
+func _mastery_up() -> void:
+	var c := GameData.mastery_cost()
+	if GameData.u < c:
+		return
+	GameData.u -= c
+	GameData.mastery += 1
+	GameData.save_game()
+	_recalc_stats()
+	_refresh_ui()
+
+
 func _select(t: String) -> void:
 	selected = t
 	if reset_armed and (reset_cd[t] > 0.0 or int(counts[t]) == 0):
@@ -1976,6 +1949,7 @@ func _to_menu() -> void:
 var ic_coin: ImageTexture
 var ic_gem: ImageTexture
 var prog_bar: ProgressBar
+var mastery_btn: Button
 var frenzy_label: Label
 
 
@@ -2196,6 +2170,9 @@ func _build_ui() -> void:
 			shop_box = vb
 		else:
 			perk_box = vb
+		var ts = TouchScroll.new()   # прокрутка пальцем, даже если палец лёг на кнопку
+		ts.target = sc
+		upg.add_child(ts)
 	tabs.set_tab_title(0, tr("  Шарики  "))
 	tabs.set_tab_title(1, tr("  Перки  "))
 	var bclose := _button(tr("Вернуться к игре"), "AccentButton", 60)
@@ -2297,6 +2274,25 @@ func _rebuild_rows() -> void:
 	chip_group = ButtonGroup.new()
 	if not GameData.unlocked[selected]:
 		selected = "basic"
+
+	# «Мастерство» — вечная трата U, первая карточка вкладки перков
+	var mc := PanelContainer.new()
+	mc.theme_type_variation = "Card"
+	perk_box.add_child(mc)
+	var mv := VBoxContainer.new()
+	mv.add_theme_constant_override("separation", 8)
+	mc.add_child(mv)
+	var mh := HBoxContainer.new()
+	mh.add_theme_constant_override("separation", 10)
+	mv.add_child(mh)
+	mh.add_child(_icon_rect(ic_gem, 32))
+	mh.add_child(_label(tr("Мастерство"), "Title"))
+	var md := _label(tr("+10% урона всех шаров за уровень, без предела"), "Muted")
+	md.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	mv.add_child(md)
+	mastery_btn = _button("", "AccentButton", 54, ic_gem)
+	mastery_btn.pressed.connect(_mastery_up)
+	mv.add_child(mastery_btn)
 
 	for t in GameData.TYPE_ORDER:
 		var def: Dictionary = GameData.TYPES[t]
@@ -2467,6 +2463,9 @@ func _refresh_ui() -> void:
 			r["spd"]["button"].text = GameData.fmt(scost)
 			r["spd"]["button"].disabled = coins < scost
 
+	var mcost := GameData.mastery_cost()
+	mastery_btn.text = tr("Уровень %d → %d · %d") % [GameData.mastery, GameData.mastery + 1, mcost]
+	mastery_btn.disabled = GameData.u < mcost
 	for t in perk_refs:
 		var r: Dictionary = perk_refs[t]
 		if r.has("unlock"):

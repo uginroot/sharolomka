@@ -446,6 +446,8 @@ func test_translations_complete() -> void:
 			keys[GameData.TYPES[t][k]] = "game_data.gd"
 	for mp in preload("res://scripts/maps.gd").get_maps():
 		keys[mp["name"]] = "maps.gd"
+	for th in preload("res://scripts/maps.gd").THEMES:
+		keys[th["name"]] = "maps.gd (темы)"
 	check(I18n.LANGS.size() >= 16, "языков меньше 16")
 	for code in I18n.LANGS:
 		if code == "ru":
@@ -968,3 +970,81 @@ func test_balance_pacing() -> void:
 		check(r["max_wait"] <= lim[2], "%s: пауза без покупок %.0f с (больше %.0f)" % [g.map["id"], r["max_wait"], lim[2]])
 		print("    %s: цель за %s мин, самая долгая пауза %.0f с" % [g.map["id"], r["goal_min"], r["max_wait"]])
 	bot.free()
+
+
+## Бесконечные уровни: любой номер даёт корректную карту, одинаковую при каждом вызове; сложность растёт.
+func test_endless_levels() -> void:
+	var Maps = preload("res://scripts/maps.gd")
+	var prev_goal := 0
+	var prev_hp := 0.0
+	for i in [7, 8, 9, 20, 50, 200, 1000]:
+		var a: Dictionary = Maps.get_map(i)
+		var b: Dictionary = Maps.get_map(i)
+		check(a == b, "уровень %d каждый раз разный" % (i + 1))
+		check(a["id"] == "lv%d" % (i + 1), "id уровня %d: %s" % [i + 1, a["id"]])
+		check(a["w"] <= 10000 and a["h"] <= 12500, "уровень %d слишком большой" % (i + 1))
+		check(int(a["goal"]) > prev_goal and float(a["hp_base"]) > prev_hp, "сложность уровня %d не растёт" % (i + 1))
+		check(int(a["goal"]) > 0 and int(a["goal"]) < 9_000_000_000_000_000_000, "цель уровня %d переполнена" % (i + 1))
+		for tp in a["templates"]:
+			check(Maps.templates().has(tp), "у уровня %d нет шаблона %s" % [i + 1, tp])
+		prev_goal = int(a["goal"])
+		prev_hp = float(a["hp_base"])
+	# уровень за пределами нарисованных реально запускается
+	for i in [7, 18, 63]:
+		var g = await new_game(i, func(): GameData.maps_unlocked = i + 1)
+		check(g.map["id"] == "lv%d" % (i + 1), "открылась не та карта")
+		check(g._kind_at(g.start_cell.x, g.start_cell.y) == 0 and g._launch_from(g.start_pos) != null, "уровень %d: со старта нельзя выстрелить" % (i + 1))
+		fire_n(g, "basic", 10)
+		var err := [""]
+		sim(g, 10.0, func(gg):
+			for bb in gg.balls:
+				var e := ball_position_ok(gg, bb)
+				if e != "":
+					err[0] = e
+					return false
+			return true)
+		check(err[0] == "", "уровень %d: %s" % [i + 1, err[0]])
+		check(g.destroyed > 0, "уровень %d: ничего не разбивается" % (i + 1))
+	# все шаблоны строятся: у каждой картинки есть полость и вход
+	var g2 = await new_game(7)
+	for name in Maps.templates():
+		var reg: Dictionary = g2._build_picture([[name, Rect2i(5, 5, 30, 30)]], Rect2i(4, 4, 32, 32))
+		var cav := 0
+		for v in reg["mask"]:
+			if v == 4:
+				cav += 1
+		check(cav > 0, "у шаблона %s нет полости с входом" % name)
+
+
+## Меню показывает открытые уровни и следующий закрытый — даже далеко за нарисованными.
+func test_menu_endless() -> void:
+	GameData.reset_all()
+	GameData.lang_choice = "ru"
+	GameData.apply_settings()
+	GameData.maps_unlocked = 15
+	var menu = load("res://scenes/main_menu.tscn").instantiate()
+	add_child(menu)
+	await get_tree().process_frame
+	check(menu.list.get_child_count() == 16, "в меню %d уровней, а должно быть 16 (15 открыто + следующий)" % menu.list.get_child_count())
+	var last_title: String = menu.list.get_child(15).get_child(0).get_child(1).get_child(0).text
+	check(last_title.ends_with("16"), "название 16-го уровня: %s" % last_title)
+	menu.queue_free()
+	GameData.reset_all()
+
+
+## «Мастерство»: бесконечная трата U, +10% урона всем шарам за уровень, сохраняется.
+func test_mastery() -> void:
+	var g = await new_game(2)
+	var d0: int = g._damage_of("splash")
+	GameData.u = 100
+	g._mastery_up()
+	check(GameData.mastery == 1 and GameData.u == 95, "мастерство не купилось за 5 U")
+	g._mastery_up()
+	check(GameData.mastery == 2 and GameData.u == 88, "второй уровень мастерства стоил не 7 U")
+	check(g._damage_of("splash") == int(round(d0 * 1.2)), "урон с мастерством 2: %d, а не %d" % [g._damage_of("splash"), int(round(d0 * 1.2))])
+	GameData.save_game()
+	GameData.mastery = 0
+	GameData.load_game()
+	check(GameData.mastery == 2, "мастерство не сохранилось")
+	GameData.mastery = 1000
+	check(GameData.mastery_cost() > 0 and g._damage_of("basic") > 0, "мастерство 1000 сломало числа")

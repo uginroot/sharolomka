@@ -164,6 +164,18 @@ func _spend_u(g) -> int:
 			break
 		g._perk_up(best)
 		spent += bc
+	for t in GameData.TYPE_ORDER:
+		if GameData.unlocked[t] and int(GameData.perks[t]) >= GameData.PERK_MAX and not GameData.supers[t] \
+				and GameData.u >= GameData.SUPER_COST:
+			g._super_up(t)
+			spent += GameData.SUPER_COST
+	var all_done := true
+	for t in GameData.TYPE_ORDER:
+		if not GameData.supers[t]:
+			all_done = false
+	while all_done and GameData.u >= GameData.mastery_cost():
+		spent += GameData.mastery_cost()
+		g._mastery_up()
 	return spent
 
 

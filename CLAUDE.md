@@ -33,6 +33,9 @@ xvfb-run -a -s "-screen 0 800x1700x24" godot --path . --rendering-driver opengl3
 ## Баланс
 - Меняешь цены, урон, жизни, U или цели карт → прогони `godot --headless --path . res://tests/balance_sim.tscn -- 45 5`
   и обнови таблицу темпа в SPEC §4а. Скука = длинные паузы без покупок и падающий доход.
+  Бесконечные уровни: `godot --headless --path . res://tests/endless_quick.tscn -- 8 9 12 19`.
+- Осторожно: `pkill -f <слово>` убивает и собственную оболочку, если слово есть в её команде —
+  останавливай по шаблону вида `pgrep -f "[G]odot.*endless_quick"`.
 
 ## Релиз
 - push в `main` → CI: тесты → UI-тесты → сборки (артефакты в Actions, там же скриншоты).

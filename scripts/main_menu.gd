@@ -2,8 +2,9 @@ extends Control
 
 const Maps = preload("res://scripts/maps.gd")
 const Icons = preload("res://scripts/icons.gd")
+const TouchScroll = preload("res://scripts/touch_scroll.gd")
 
-var maps: Array
+var scroll: ScrollContainer
 var list: VBoxContainer
 var lbl_u: Label
 var lbl_bonus: Label
@@ -16,7 +17,6 @@ var settings_box: VBoxContainer
 func _ready() -> void:
 	# меню статично: кадры рисуются только при изменениях
 	OS.low_processor_usage_mode = true
-	maps = Maps.get_maps()
 
 	var bg := ColorRect.new()
 	bg.color = GameData.C_BG
@@ -73,6 +73,10 @@ func _ready() -> void:
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list.add_theme_constant_override("separation", 12)
 	sc.add_child(list)
+	scroll = sc
+	var ts = TouchScroll.new()   # прокрутка списка уровней пальцем, даже с кнопки «Играть»
+	ts.target = sc
+	add_child(ts)
 
 	var bset := Button.new()
 	bset.text = tr("Настройки")
@@ -254,23 +258,28 @@ func _fill() -> void:
 	var bonus := int(round((GameData.coin_mult() - 1.0) * 100.0))
 	lbl_bonus.text = tr("Бонус монет +%d%%") % bonus
 	lbl_bonus.visible = bonus > 0
-	for i in maps.size():
-		var mp: Dictionary = maps[i]
+	# пройденные и открытые уровни + следующий закрытый; уровни бесконечны
+	var count := maxi(Maps.HANDMADE, GameData.maps_unlocked + 1)
+	var current_card: Control = null
+	for i in count:
+		var mp: Dictionary = Maps.get_map(i)
 		var locked: bool = i >= GameData.maps_unlocked
 		var card := PanelContainer.new()
 		card.theme_type_variation = "Card"
 		if locked:
 			card.modulate = Color(1, 1, 1, 0.5)
 		list.add_child(card)
+		if i == GameData.maps_unlocked - 1:
+			current_card = card
 		var h := HBoxContainer.new()
 		h.add_theme_constant_override("separation", 12)
 		card.add_child(h)
 		var num := Label.new()
 		num.text = str(i + 1)
-		num.custom_minimum_size.x = 36
+		num.custom_minimum_size.x = 48
 		num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		num.add_theme_font_override("font", GameData.font_bold)
-		num.add_theme_font_size_override("font_size", 30)
+		num.add_theme_font_size_override("font_size", 28)
 		num.add_theme_color_override("font_color", GameData.C_ACCENT.lightened(0.3))
 		h.add_child(num)
 		var tv := VBoxContainer.new()
@@ -278,8 +287,9 @@ func _fill() -> void:
 		tv.add_theme_constant_override("separation", 2)
 		h.add_child(tv)
 		var name := Label.new()
-		name.text = tr(mp["name"])
+		name.text = Maps.title(mp, tr)
 		name.theme_type_variation = "Title"
+		name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		tv.add_child(name)
 		var info := Label.new()
 		info.theme_type_variation = "Muted"
@@ -303,6 +313,15 @@ func _fill() -> void:
 			b.theme_type_variation = "AccentButton"
 		b.pressed.connect(_open.bind(i))
 		h.add_child(b)
+	# прокручиваем к текущему уровню
+	if current_card != null:
+		_scroll_to.call_deferred(current_card)
+
+
+func _scroll_to(card: Control) -> void:
+	await get_tree().process_frame
+	if is_instance_valid(card):
+		scroll.ensure_control_visible(card)
 
 
 func _open(i: int) -> void:

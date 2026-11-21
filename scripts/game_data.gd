@@ -56,6 +56,7 @@ var u := 0
 var unlocked := {}
 var perks := {}
 var supers := {}
+var mastery := 0             # «Мастерство»: +10% урона всем шарам за уровень, без предела (вечная трата U)
 var maps_unlocked := 1
 var maps_done := {}
 var map_states := {}
@@ -104,6 +105,7 @@ func _reset_defaults() -> void:
 		perks[t] = 0
 		supers[t] = false
 	maps_unlocked = 1
+	mastery = 0
 	maps_done = {}
 	map_states = {}
 
@@ -135,7 +137,7 @@ func save_game() -> void:
 	_save_wait = 0.0
 	var data := {
 		"u": u, "unlocked": unlocked, "perks": perks, "supers": supers,
-		"maps_unlocked": maps_unlocked, "maps_done": maps_done, "map_states": map_states,
+		"maps_unlocked": maps_unlocked, "mastery": mastery, "maps_done": maps_done, "map_states": map_states,
 		"eco_mode": eco_mode, "keep_screen": keep_screen, "lang_choice": lang_choice,
 	}
 	# атомарно: временный файл + переименование
@@ -166,11 +168,24 @@ func load_game() -> void:
 		supers[t] = bool(sp.get(t, false))
 	maps_unlocked = maxi(1, int(data.get("maps_unlocked", 1))) if typeof(data.get("maps_unlocked", 1)) in [TYPE_INT, TYPE_FLOAT] else 1
 	maps_done = _dict(data.get("maps_done", {}))
+	mastery = maxi(0, int(data.get("mastery", 0))) if typeof(data.get("mastery", 0)) in [TYPE_INT, TYPE_FLOAT] else 0
 	map_states = _dict(data.get("map_states", {}))
 	eco_mode = bool(data.get("eco_mode", false))
 	keep_screen = bool(data.get("keep_screen", false))
 	# старый ключ "lang" записывался автоматически — не считаем его выбором игрока
 	lang_choice = String(data.get("lang_choice", ""))
+
+
+## «Мастерство»: бесконечная трата U, когда перки и суперы куплены.
+const MASTERY_STEP := 0.10
+
+
+func mastery_cost() -> int:
+	return 5 + 2 * mastery
+
+
+func mastery_mult() -> float:
+	return 1.0 + MASTERY_STEP * mastery
 
 
 ## Постоянный бонус монет: +25% за каждую выполненную цель карты.
