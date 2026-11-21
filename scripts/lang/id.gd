@@ -55,7 +55,6 @@ const T := {
 	"Перк %d/%d · %d": "Perk %d/%d · %d",
 	"Супер · %d": "Super · %d",
 	"Супер есть": "Super dimiliki",
-	"Цель карты выполнена!\n+%d U, открыта следующая карта": "Target peta tercapai!\n+%d U, peta berikutnya terbuka",
 	"Победа!": "Menang!",
 	"Карта «%s» разбита полностью!": "Peta “%s” hancur seluruhnya!",
 	"В меню": "Ke menu",
@@ -96,4 +95,9 @@ const T := {
 	"Яд 60% урона в секунду, 3 с +1 с за уровень": "Racun: 60% kerusakan per detik, 3 dtk +1 dtk per level",
 	"Эпидемия": "Wabah",
 	"Яд перекидывается на соседей, когда квадрат разбит": "Racun menular ke tetangga saat kotak hancur",
+	"Цель карты выполнена!\n+%d U, +%d%% монет навсегда, открыта следующая карта": "Target peta tercapai!\n+%d U, +%d%% koin selamanya, peta berikutnya terbuka",
+	"Финал: осталось %d — шары летят к последним квадратам": "Final: tersisa %d — bola terbang ke kotak terakhir",
+	"Золотой квадрат! Урон ×2 на %d с": "Kotak emas! Kerusakan ×2 selama %d dtk",
+	"Урон ×2 · %d с": "Kerusakan ×2 · %d dtk",
+	"Бонус монет +%d%%": "Bonus koin +%d%%",
 }

@@ -177,7 +177,7 @@ func _run() -> void:
 
 	# цена следующего шара на фишке
 	var chip: Button = g.chips["basic"]
-	check(chip.text.begins_with("×") and "·" in chip.text, "на фишке шара видна цена: %s" % chip.text)
+	check(chip.get_meta("cnt").text.begins_with("×") and chip.get_meta("price").text != "", "на фишке шара видны число и цена")
 	check(_find(get_tree().root, "Выстрел") == null, "кнопки «Выстрел» больше нет")
 
 	# сдвиг карты двумя пальцами двигает точку выстрела

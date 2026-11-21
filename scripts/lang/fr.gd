@@ -55,7 +55,6 @@ const T := {
 	"Перк %d/%d · %d": "Atout %d/%d · %d",
 	"Супер · %d": "Super · %d",
 	"Супер есть": "Super acquis",
-	"Цель карты выполнена!\n+%d U, открыта следующая карта": "Objectif de la carte atteint !\n+%d U, carte suivante débloquée",
 	"Победа!": "Victoire !",
 	"Карта «%s» разбита полностью!": "La carte « %s » est entièrement cassée !",
 	"В меню": "Au menu",
@@ -96,4 +95,9 @@ const T := {
 	"Яд 60% урона в секунду, 3 с +1 с за уровень": "Poison : 60 % des dégâts par seconde, 3 s +1 s par niveau",
 	"Эпидемия": "Épidémie",
 	"Яд перекидывается на соседей, когда квадрат разбит": "Le poison passe aux voisins quand le carré se brise",
+	"Цель карты выполнена!\n+%d U, +%d%% монет навсегда, открыта следующая карта": "Objectif de la carte atteint !\n+%d U, +%d%% de pièces pour toujours, carte suivante débloquée",
+	"Финал: осталось %d — шары летят к последним квадратам": "Finale : il en reste %d — les balles filent vers les derniers carrés",
+	"Золотой квадрат! Урон ×2 на %d с": "Carré doré ! Dégâts ×2 pendant %d s",
+	"Урон ×2 · %d с": "Dégâts ×2 · %d s",
+	"Бонус монет +%d%%": "Bonus de pièces +%d%%",
 }

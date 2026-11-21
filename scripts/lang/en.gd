@@ -55,7 +55,6 @@ const T := {
 	"Перк %d/%d · %d": "Perk %d/%d · %d",
 	"Супер · %d": "Super · %d",
 	"Супер есть": "Super owned",
-	"Цель карты выполнена!\n+%d U, открыта следующая карта": "Map goal reached!\n+%d U, next map unlocked",
 	"Победа!": "Victory!",
 	"Карта «%s» разбита полностью!": "Map “%s” is completely broken!",
 	"В меню": "To menu",
@@ -96,4 +95,9 @@ const T := {
 	"Яд 60% урона в секунду, 3 с +1 с за уровень": "Poison: 60% damage per second, 3 s +1 s per level",
 	"Эпидемия": "Epidemic",
 	"Яд перекидывается на соседей, когда квадрат разбит": "Poison spreads to neighbours when a square breaks",
+	"Цель карты выполнена!\n+%d U, +%d%% монет навсегда, открыта следующая карта": "Map goal reached!\n+%d U, +%d%% coins forever, next map unlocked",
+	"Финал: осталось %d — шары летят к последним квадратам": "Finale: %d left — balls fly to the last squares",
+	"Золотой квадрат! Урон ×2 на %d с": "Golden square! Damage ×2 for %d s",
+	"Урон ×2 · %d с": "Damage ×2 · %d s",
+	"Бонус монет +%d%%": "Coin bonus +%d%%",
 }

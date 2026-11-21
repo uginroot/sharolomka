@@ -30,6 +30,10 @@ xvfb-run -a -s "-screen 0 800x1700x24" godot --path . --rendering-driver opengl3
   (тест проверит). После правок интерфейса смотри скриншоты и на длинном языке (de), и на арабском (справа налево).
 - Формат сохранения карт поменялся → повысь `ver` в `game.gd` (`_save_state`/`_load_state`).
 
+## Баланс
+- Меняешь цены, урон, жизни, U или цели карт → прогони `godot --headless --path . res://tests/balance_sim.tscn -- 45 5`
+  и обнови таблицу темпа в SPEC §4а. Скука = длинные паузы без покупок и падающий доход.
+
 ## Релиз
 - push в `main` → CI: тесты → UI-тесты → сборки (артефакты в Actions, там же скриншоты).
 - Релиз: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Release с APK, zip (Windows), tar.gz (Linux).

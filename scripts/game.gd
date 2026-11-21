@@ -17,6 +17,9 @@ const SPD_MAX := 10
 const MAX_OFFLINE := 86400.0     # перематываем не больше суток
 const WARP_BUDGET_US := 9000     # сколько микросекунд за кадр можно тратить на перемотку
 const PREGEN_LIMIT := 60000      # карты меньше этого генерируем целиком (можно пройти на 100%)
+const GOLD_RATE := 30            # золотой квадрат: шанс на 10 000
+const FRENZY_TIME := 15.0        # «золотая лихорадка»: урон ×2, секунд
+const FINALE_SHARE := 0.08       # финал маленькой карты, когда осталось ≤ 8% квадратов
 const FOG := Color(0.07, 0.08, 0.11)
 const FLOOR := Color(0.13, 0.15, 0.2)
 const WALL_FACE := Color(0.9, 0.92, 0.96)
@@ -53,6 +56,13 @@ var total := 0
 var destroyed := 0
 var goal := 0
 var goal_done := false
+var coin_acc := 0.0              # дробная часть монет при бонусе
+var coin_mult := 1.0
+var frenzy_t := 0.0              # осталось «золотой лихорадки»
+var finale := false              # финал: шары летят к последним квадратам
+var finale_ids := PackedInt32Array()
+var finale_dist := PackedInt32Array()
+var finale_t := 0.0
 var ex0 := 0
 var ey0 := 0
 var ex1 := 0
@@ -228,6 +238,7 @@ func _ready() -> void:
 			if _kind_at(x, y) == 0:
 				_reveal(x, y)
 
+	coin_mult = GameData.coin_mult()
 	_recalc_stats()
 	# шары продолжают движение с тех мест, где были при выходе
 	var placed := {}
@@ -282,9 +293,11 @@ func _gen_chunk(ck: int, blob: Array):
 	c.hp.resize(CS * CS)
 	c.kind.resize(CS * CS)
 	c.vis.resize(CS * CS)
+	c.gold.resize(CS * CS)
 	c.hp.fill(0)
 	c.kind.fill(0)
 	c.vis.fill(0)
+	c.gold.fill(0)
 	var cx0 := (ck % cw) * CS
 	@warning_ignore("integer_division")
 	var cy0 := (ck / cw) * CS
@@ -310,6 +323,8 @@ func _gen_chunk(ck: int, blob: Array):
 				continue
 			c.kind[li] = 1
 			c.hp[li] = int(ceil(hb * pow(1.0 + sqrt(d2) * hg, 1.6)))
+			if _hash3(x, y, seed_i + 13) % 10000 < GOLD_RATE:
+				c.gold[li] = 1
 			solid += 1
 	if not blob.is_empty():
 		var raw: PackedByteArray = (blob[0] as PackedByteArray).decompress(int(blob[1]), FileAccess.COMPRESSION_ZSTD)
@@ -703,8 +718,11 @@ func _speed(t: String) -> float:
 	return float(GameData.TYPES[t]["speed"]) * (1.0 + 0.08 * int(spd_lvl[t]))
 
 
+## Урон: base·(1 + ур.) и ×2 на каждом 10-м уровне — вехи держат рост экспоненциальным
+## (без них доход глохнет против экспоненциальных цен — симулятор баланса v0.16).
 func _damage_of(t: String) -> int:
-	var d := float(GameData.TYPES[t]["damage"]) * (1 + int(dmg_lvl[t]))
+	var lv := int(dmg_lvl[t])
+	var d := float(GameData.TYPES[t]["damage"]) * (1 + lv) * pow(2.0, floori(lv / 10.0))
 	if t == "pierce":
 		d *= 1.0 + 0.2 * int(GameData.perks[t])
 	return maxi(1, int(round(d)))
@@ -760,6 +778,17 @@ func _spawn_ball(t: String, ang: float, at = null) -> void:
 
 func _sim(dt: float) -> void:
 	time_acc += dt
+	if finale:
+		finale_t -= dt
+		if finale_t <= 0.0:
+			finale_t = 1.0
+			_finale_field()
+		for b in balls:
+			if time_acc - b.seek_t > 0.25:
+				b.seek_t = time_acc + randf() * 0.05
+				_finale_steer(b)
+	if frenzy_t > 0.0:
+		frenzy_t = maxf(0.0, frenzy_t - dt)
 	for b in balls:
 		_move_ball(b, dt)
 	if not poisons.is_empty():
@@ -973,7 +1002,9 @@ func _move_ball(b, delta: float) -> void:
 		if bny != 0.0:
 			d.y = -d.y
 		p += Vector2(bnx, bny) * 0.02
-		if sniper and (hit >= 0 or st_sup[2] == 1) and time_acc - b.seek_t > 0.15:
+		if finale:
+			pass   # в финале шары ведёт поле расстояний (см. _sim)
+		elif sniper and (hit >= 0 or st_sup[2] == 1) and time_acc - b.seek_t > 0.15:
 			b.seek_t = time_acc
 			b.pos = p
 			b.vel = d * speed
@@ -988,7 +1019,7 @@ func _move_ball(b, delta: float) -> void:
 ## Возвращает true, если шарик пролетает сквозь квадрат.
 func _hit_cell(b, id: int) -> bool:
 	var ti: int = b.ti
-	var dmg := st_dmg[ti]
+	var dmg := st_dmg[ti] * (2 if frenzy_t > 0.0 else 1)
 	var lvl := st_lvl[ti]
 	var sup := st_sup[ti] == 1
 	match ti:
@@ -1088,7 +1119,11 @@ func _damage(id: int, amount: int, b) -> void:
 	c.hp[li] = h - dealt
 	c.changed = true
 	c.blob_dirty = true
-	coins += dealt
+	# монеты = снятые жизни × постоянный бонус за пройденные карты
+	coin_acc += dealt * coin_mult
+	var add := int(coin_acc)
+	coin_acc -= add
+	coins += add
 	if b != null:
 		b.earned += dealt
 	_mark(ck)
@@ -1103,12 +1138,19 @@ func _damage(id: int, amount: int, b) -> void:
 func _on_destroyed(x: int, y: int, id: int) -> void:
 	_reveal(x, y)
 	# U-баллы спрятаны в части квадратов (в полостях картинок — чаще)
-	var rate := 250 * (3 if _mask_at(x, y) == 4 else 1)
+	var rate := int(map.get("u_rate", 10)) * (3 if _mask_at(x, y) == 4 else 1)
 	if _hash3(x, y, seed_i + 7) % 10000 < rate:
 		GameData.u += 1
 		GameData.request_save()   # отложенно: при частых находках не дёргаем флеш-память
 		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "+1 U", "t": 1.5})
 		overlay_dirty = true
+	var c = chunks[(x >> 5) + (y >> 5) * cw]
+	var li := ((y & 31) << 5) | (x & 31)
+	if c.gold[li] == 1:
+		c.gold[li] = 0
+		frenzy_t = minf(maxf(frenzy_t, 0.0) + FRENZY_TIME, FRENZY_TIME * 2.0)   # копится, но не больше 30 с
+		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "×2!", "t": 1.5})
+		_show_toast(tr("Золотой квадрат! Урон ×2 на %d с") % int(FRENZY_TIME))
 	if poisons.has(id):
 		var p: Dictionary = poisons[id]
 		poisons.erase(id)
@@ -1143,17 +1185,105 @@ func _tick_poison(dt: float) -> void:
 			_mark_cell(id)
 
 
+## Финал маленькой карты: последние ≤8% квадратов подсвечиваются, шары летят к ним сами —
+## без этого последние минуты уходили на поиск разрозненных квадратов (симулятор баланса v0.16).
+func _start_finale() -> void:
+	finale = true
+	finale_ids = PackedInt32Array()
+	for ck in chunks.size():
+		var c = chunks[ck]
+		if c == null or c.solid == 0:
+			continue
+		for li in CS * CS:
+			if c.kind[li] == 1:
+				var x := (ck % cw) * CS + (li & 31)
+				@warning_ignore("integer_division")
+				var y := (ck / cw) * CS + (li >> 5)
+				finale_ids.append(y * W + x)
+				if c.vis[li] == 0:
+					c.vis[li] = 1
+					c.changed = true
+					c.blob_dirty = true
+					_ensure_node(ck)
+				_mark(ck)
+	_finale_field()
+	_show_toast(tr("Финал: осталось %d — шары летят к последним квадратам") % finale_ids.size())
+
+
+## Поле расстояний финала: обход в ширину от оставшихся квадратов по свободным клеткам.
+## Шар поворачивает к соседней клетке, которая ближе к цели, — так он обходит стены
+## (наведение «по прямой» не находило квадраты в выемках картинок).
+func _finale_field() -> void:
+	finale_dist.resize(W * H)
+	finale_dist.fill(1 << 30)
+	var q := PackedInt32Array()
+	var live := PackedInt32Array()
+	for id in finale_ids:
+		if _hp_of(id) > 0:
+			live.append(id)
+			finale_dist[id] = 0
+			q.append(id)
+	finale_ids = live
+	var head := 0
+	while head < q.size():
+		var id := q[head]
+		head += 1
+		var x := id % W
+		@warning_ignore("integer_division")
+		var y := id / W
+		var nd := finale_dist[id] + 1
+		for o in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var xx: int = x + o.x
+			var yy: int = y + o.y
+			if xx < 0 or yy < 0 or xx >= W or yy >= H:
+				continue
+			var j: int = yy * W + xx
+			if finale_dist[j] <= nd or _kind_at(xx, yy) != 0:
+				continue
+			finale_dist[j] = nd
+			q.append(j)
+
+
+func _finale_steer(b) -> void:
+	var cx := int(b.pos.x * INV)
+	var cy := int(b.pos.y * INV)
+	if cx < 0 or cy < 0 or cx >= W or cy >= H:
+		return
+	var best := finale_dist[cy * W + cx]
+	var to := Vector2i(-1, -1)
+	for o in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
+			Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)]:
+		var xx: int = cx + o.x
+		var yy: int = cy + o.y
+		if xx < 0 or yy < 0 or xx >= W or yy >= H:
+			continue
+		# по диагонали — только если не срезаем угол стены
+		if o.x != 0 and o.y != 0 and (_kind_at(cx + o.x, cy) == 2 or _kind_at(cx, cy + o.y) == 2):
+			continue
+		var dv: int = finale_dist[yy * W + xx]
+		if dv < best:
+			best = dv
+			to = Vector2i(xx, yy)
+	if to.x >= 0:
+		var tc := (Vector2(to) + Vector2(0.5, 0.5)) * CELL
+		b.vel = (tc - b.pos).normalized() * b.vel.length()
+
+
 func _check_goal() -> void:
+	if track_all and not finale and alive > 0 and alive <= maxi(12, int(total * FINALE_SHARE)):
+		_start_finale()
+
 	if not goal_done and destroyed >= goal:
 		goal_done = true
 		var id := String(map["id"])
 		var reward := 2 if GameData.maps_done.has(id) else 5
 		GameData.u += reward
 		GameData.maps_done[id] = true
+		coin_mult = GameData.coin_mult()
 		GameData.maps_unlocked = maxi(GameData.maps_unlocked, map_index + 2)
 		GameData.save_game()
 		if not (track_all and alive <= 0):
-			_show_toast(tr("Цель карты выполнена!\n+%d U, открыта следующая карта") % reward)
+			_show_toast(tr("Цель карты выполнена!\n+%d U, +%d%% монет навсегда, открыта следующая карта") % [reward, int(GameData.MAP_BONUS * 100)])
 	if track_all and alive <= 0 and not completed:
 		completed = true
 		GameData.map_states.erase(String(map["id"]))
@@ -1279,8 +1409,11 @@ func _draw_chunk(ck: int) -> void:
 		if kind[li] != 1 or vis[li] == 0:
 			continue
 		var r := Rect2((li & 31) * CELL + gap, (li >> 5) * CELL + gap, CELL - 2.0 * gap, CELL - 2.0 * gap)
-		var col := _hp_color(hp[li])
+		var golden: bool = c.gold[li] == 1
+		var col := Color(1.0, 0.8, 0.2) if golden else _hp_color(hp[li])
 		n.draw_rect(r, col)
+		if golden and detail:
+			n.draw_rect(r.grow(-2.0), Color(1, 1, 1, 0.9), false, 2.0)
 		if detail:
 			n.draw_rect(Rect2(r.position, Vector2(r.size.x, 4.0)), col.lerp(Color.WHITE, 0.3))
 			n.draw_rect(Rect2(r.position.x, r.end.y - 4.0, r.size.x, 4.0), col.darkened(0.22))
@@ -1342,7 +1475,7 @@ func _build_chunk_tex(c) -> void:
 				0:
 					col = FLOOR
 				1:
-					col = _hp_color(c.hp[li])
+					col = Color(1.0, 0.8, 0.2) if c.gold[li] == 1 else _hp_color(c.hp[li])
 				2:
 					col = WALL_FACE
 		img.set_pixel(li & 31, li >> 5, col)
@@ -1843,6 +1976,7 @@ func _to_menu() -> void:
 var ic_coin: ImageTexture
 var ic_gem: ImageTexture
 var prog_bar: ProgressBar
+var frenzy_label: Label
 
 
 func _safe_margins() -> Array:
@@ -1968,6 +2102,12 @@ func _build_ui() -> void:
 	btn_snap = _button("", "", 52, Icons.angle(40))
 	btn_snap.pressed.connect(_cycle_snap)
 	tr.add_child(btn_snap)
+	frenzy_label = _label("")
+	frenzy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	frenzy_label.add_theme_color_override("font_color", GameData.C_GOLD)
+	frenzy_label.add_theme_font_override("font", GameData.font_bold)
+	frenzy_label.visible = false
+	tv.add_child(frenzy_label)
 	top_bar.resized.connect(_on_bars_resized)
 
 	# --- нижняя панель: выбор шара, сброс, прокачка
@@ -2162,17 +2302,44 @@ func _rebuild_rows() -> void:
 		var def: Dictionary = GameData.TYPES[t]
 		var unlocked: bool = GameData.unlocked[t]
 
-		# --- фишка выбора шара на главном экране
+		# --- фишка выбора шара: значок и число шаров сверху, цена снизу (влезают все 5 типов)
 		if unlocked:
-			var chip := _button("", "ChipButton", 58, Icons.dot(def["color"], 44))
+			var chip := _button("", "ChipButton", 62)
 			chip.toggle_mode = true
 			chip.button_group = chip_group
 			chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			chip.text_direction = Control.TEXT_DIRECTION_LTR   # «×2 · 46» не переворачивается в арабском
+			chip.custom_minimum_size.x = 0
 			chip.button_pressed = (t == selected)
 			chip.pressed.connect(_select.bind(t))
 			chips_box.add_child(chip)
+			var cv := VBoxContainer.new()
+			cv.set_anchors_preset(Control.PRESET_FULL_RECT)
+			cv.alignment = BoxContainer.ALIGNMENT_CENTER
+			cv.add_theme_constant_override("separation", 0)
+			cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			chip.add_child(cv)
+			var top := HBoxContainer.new()
+			top.alignment = BoxContainer.ALIGNMENT_CENTER
+			top.add_theme_constant_override("separation", 4)
+			top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			cv.add_child(top)
+			var ic := _icon_rect(Icons.dot(def["color"], 44), 20)
+			ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			top.add_child(ic)
+			var cnt := Label.new()
+			cnt.add_theme_font_override("font", GameData.font_bold)
+			cnt.add_theme_font_size_override("font_size", 19)
+			cnt.text_direction = Control.TEXT_DIRECTION_LTR
+			top.add_child(cnt)
+			var price := Label.new()
+			price.add_theme_font_size_override("font_size", 15)
+			price.add_theme_color_override("font_color", GameData.C_GOLD)
+			price.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			price.text_direction = Control.TEXT_DIRECTION_LTR
+			cv.add_child(price)
 			chips[t] = chip
+			chip.set_meta("cnt", cnt)
+			chip.set_meta("price", price)
 
 		# --- карточка магазина
 		var card := PanelContainer.new()
@@ -2251,10 +2418,16 @@ func _refresh_ui() -> void:
 	else:
 		lbl_prog.text = tr("%s из %s") % [GameData.fmt(destroyed), GameData.fmt(goal)]
 	btn_snap.text = [tr("любой"), tr("45°"), tr("90°")][snap_mode]
+	if frenzy_t > 0.0:
+		frenzy_label.text = tr("Урон ×2 · %d с") % int(ceil(frenzy_t))
+		frenzy_label.visible = true
+	elif frenzy_label.visible:
+		frenzy_label.visible = false
 	for t in chips:
 		# цена следующего шара прямо на фишке; не хватает денег — фишка тусклее
 		var price := _ball_cost(t)
-		chips[t].text = "×%d · %s" % [counts[t], GameData.fmt(price)]
+		chips[t].get_meta("cnt").text = "×%d" % counts[t]
+		chips[t].get_meta("price").text = GameData.fmt(price)
 		chips[t].modulate = Color(1, 1, 1, 1.0 if coins >= price else 0.6)
 	var cd: float = reset_cd[selected]
 	if reset_armed:

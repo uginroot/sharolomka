@@ -55,7 +55,6 @@ const T := {
 	"Перк %d/%d · %d": "Avantaj %d/%d · %d",
 	"Супер · %d": "Süper · %d",
 	"Супер есть": "Süper alındı",
-	"Цель карты выполнена!\n+%d U, открыта следующая карта": "Harita hedefi tamamlandı!\n+%d U, sonraki harita açıldı",
 	"Победа!": "Zafer!",
 	"Карта «%s» разбита полностью!": "“%s” haritası tamamen kırıldı!",
 	"В меню": "Menüye",
@@ -96,4 +95,9 @@ const T := {
 	"Яд 60% урона в секунду, 3 с +1 с за уровень": "Zehir: saniyede hasarın %60'ı, 3 sn + seviye başına 1 sn",
 	"Эпидемия": "Salgın",
 	"Яд перекидывается на соседей, когда квадрат разбит": "Kare kırılınca zehir komşulara geçer",
+	"Цель карты выполнена!\n+%d U, +%d%% монет навсегда, открыта следующая карта": "Harita hedefi tamamlandı!\n+%d U, kalıcı +%d%% jeton, sonraki harita açıldı",
+	"Финал: осталось %d — шары летят к последним квадратам": "Final: %d kaldı — toplar son karelere uçuyor",
+	"Золотой квадрат! Урон ×2 на %d с": "Altın kare! %d sn boyunca hasar ×2",
+	"Урон ×2 · %d с": "Hasar ×2 · %d sn",
+	"Бонус монет +%d%%": "Jeton bonusu +%d%%",
 }

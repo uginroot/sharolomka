@@ -4,6 +4,7 @@ extends RefCounted
 var hp := PackedInt32Array()     # жизни квадратов
 var kind := PackedByteArray()    # 0 пусто, 1 квадрат, 2 стена, 3 за краем карты
 var vis := PackedByteArray()     # 1 — клетка видна (туман: только первый слой)
+var gold := PackedByteArray()    # 1 — золотой квадрат (по хешу координат, не сохраняется)
 var solid := 0                   # сколько квадратов и стен — для быстрого пролёта пустых кусков
 var changed := false             # отличается от сгенерированного — надо сохранять
 var blob_dirty := true

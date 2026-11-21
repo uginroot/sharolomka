@@ -490,6 +490,22 @@ func test_russian_ui() -> void:
 	check(g.btn_reset.text.begins_with("Сброс"), "кнопка сброса не на русском: %s" % g.btn_reset.text)
 
 
+## Нижняя панель не шире экрана, даже когда открыты все 5 типов и цены большие.
+func test_bottom_bar_fits() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	for t in GameData.TYPE_ORDER:
+		g.counts[t] = 40
+	g._refresh_ui()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var vw: float = get_viewport().get_visible_rect().size.x
+	check(g.bottom_bar.size.x <= vw + 0.5, "нижняя панель %.0f px шире экрана %.0f px" % [g.bottom_bar.size.x, vw])
+	for t in g.chips:
+		var r: Rect2 = g.chips[t].get_global_rect()
+		check(r.end.x <= vw + 0.5, "фишка %s за краем экрана" % t)
+	check(g.chips["basic"].get_meta("price").text != "", "на фишке нет цены")
+
+
 ## На любом языке, кроме русского, в интерфейсе игры и меню нет русских букв.
 func test_foreign_ui() -> void:
 	for code in GameData.LANGS:
@@ -842,3 +858,113 @@ func test_corrupt_global_save() -> void:
 	check(GameData.maps_unlocked >= 1, "открытых карт меньше одной")
 	check(typeof(GameData.map_states) == TYPE_DICTIONARY and typeof(GameData.maps_done) == TYPE_DICTIONARY, "словари из мусора")
 	GameData.reset_all()
+
+
+## Золотой квадрат: разрушение включает «золотую лихорадку» (урон ×2 на 15 с).
+func test_golden_frenzy() -> void:
+	var g = await new_game(2)
+	var gold_id := -1
+	for ck in g.chunks.size():
+		var c = g.chunks[ck]
+		if c == null:
+			continue
+		for li in 1024:
+			if c.gold[li] == 1 and c.kind[li] == 1:
+				gold_id = ((ck / g.cw) * 32 + (li >> 5)) * g.W + (ck % g.cw) * 32 + (li & 31)
+				break
+		if gold_id >= 0:
+			break
+	check(gold_id >= 0, "на карте нет золотых квадратов")
+	if gold_id < 0:
+		return
+	g._damage(gold_id, 1_000_000, null)
+	check(g.frenzy_t > 14.0, "лихорадка не началась")
+	g.frenzy_t = 29.0
+	g._on_destroyed(gold_id % g.W, gold_id / g.W, gold_id)   # повторно — флаг уже снят, лихорадка не растёт
+	check(g.frenzy_t <= 30.0, "лихорадка копится больше 30 с")
+	g.frenzy_t = 15.0
+	g.balls.clear()
+	g._fire(g.start_pos)
+	var b = g.balls[0]
+	var dmg0: int = g.st_dmg[0]
+	var target := -1
+	for y in range(g.ey0, g.ey1 + 1):
+		for x in range(g.ex0, g.ex1 + 1):
+			if g._kind_at(x, y) == 1 and g._hp_of(y * g.W + x) > dmg0 * 2:
+				target = y * g.W + x
+	var hp0: int = g._hp_of(target)
+	g._hit_cell(b, target)
+	check(hp0 - g._hp_of(target) == dmg0 * 2, "в лихорадку урон не удвоен: %d вместо %d" % [hp0 - g._hp_of(target), dmg0 * 2])
+	sim(g, 16.0)
+	check(g.frenzy_t == 0.0, "лихорадка не закончилась")
+
+
+## Финал маленькой карты: последние квадраты открываются, шары добивают их сами.
+func test_finale_completes() -> void:
+	var g = await new_game(1, func(): unlock_all())
+	var ids := []
+	for ck in g.chunks.size():
+		var c = g.chunks[ck]
+		for li in 1024:
+			if c.kind[li] == 1:
+				ids.append(((ck / g.cw) * 32 + (li >> 5)) * g.W + (ck % g.cw) * 32 + (li & 31))
+	ids.shuffle()
+	var keep: int = int(g.total * 0.05)
+	for i in ids.size() - keep:
+		g._damage(ids[i], 1_000_000, null)
+	g._check_goal()
+	check(g.finale, "финал не начался при %d оставшихся" % g.alive)
+	var hidden := 0
+	for id in g.finale_ids:
+		if not g._vis_id(id):
+			hidden += 1
+	check(hidden == 0, "в финале скрыто квадратов: %d" % hidden)
+	g.coins = 100_000_000
+	fire_n(g, "basic", 10)
+	for k in 10:
+		g._buy_dmg("basic")   # урон ×22 — финал проверяет наведение, а не терпение
+	var t0: float = g.time_acc
+	sim(g, 90.0, func(gg):
+		gg._check_goal()
+		return gg.alive > 0)
+	check(g.alive == 0, "за 90 с финала осталось квадратов: %d" % g.alive)
+	print("    финал на %d квадратов занял %.0f с" % [keep, g.time_acc - t0])
+
+
+## Урон: на каждом 10-м уровне — дополнительное удвоение.
+func test_damage_milestones() -> void:
+	var g = await new_game(0)
+	var base: float = GameData.TYPES["basic"]["damage"]
+	for pair in [[0, 1], [9, 10], [10, 22], [19, 40], [20, 84]]:
+		g.dmg_lvl["basic"] = pair[0]
+		check(g._damage_of("basic") == int(base * pair[1]), "урон на ур.%d: %d, а не %d" % [pair[0], g._damage_of("basic"), int(base * pair[1])])
+
+
+## Постоянный бонус монет за выполненные цели карт.
+func test_coin_bonus() -> void:
+	var g = await new_game(2, func():
+		GameData.maps_done = {"meadow": true, "heart": true})
+	check(is_equal_approx(g.coin_mult, 1.5), "бонус за 2 карты %.2f, а не 1.5" % g.coin_mult)
+	var id := -1
+	for y in g.H:
+		for x in g.W:
+			if id < 0 and g._kind_at(x, y) == 1 and g._hp_of(y * g.W + x) >= 10:
+				id = y * g.W + x
+	check(id >= 0, "не нашёлся квадрат с 10+ жизнями")
+	var c0: int = g.coins
+	g._damage(id, 10, null)
+	check(g.coins - c0 == 15, "10 урона при бонусе +50%% дали %d монет" % (g.coins - c0))
+
+
+## Темп игры (бот из симулятора баланса): первые карты проходятся быстро и без долгих пауз без покупок.
+func test_balance_pacing() -> void:
+	var bot = load("res://tests/balance_sim.gd").new()
+	bot.rng.seed = 42
+	var limits := [[0, 8.0, 60.0], [1, 12.0, 90.0]]
+	for lim in limits:
+		var g = await new_game(lim[0], func(): GameData.maps_done = {} if lim[0] == 0 else {"meadow": true})
+		var r: Dictionary = bot._play(g, lim[1])
+		check(g.goal_done, "%s: цель не достигнута за %.0f мин" % [g.map["id"], lim[1]])
+		check(r["max_wait"] <= lim[2], "%s: пауза без покупок %.0f с (больше %.0f)" % [g.map["id"], r["max_wait"], lim[2]])
+		print("    %s: цель за %s мин, самая долгая пауза %.0f с" % [g.map["id"], r["goal_min"], r["max_wait"]])
+	bot.free()

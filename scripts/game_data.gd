@@ -173,6 +173,14 @@ func load_game() -> void:
 	lang_choice = String(data.get("lang_choice", ""))
 
 
+## Постоянный бонус монет: +25% за каждую выполненную цель карты.
+const MAP_BONUS := 0.25
+
+
+func coin_mult() -> float:
+	return 1.0 + MAP_BONUS * maps_done.size()
+
+
 static func _dict(v) -> Dictionary:
 	return v if typeof(v) == TYPE_DICTIONARY else {}
 

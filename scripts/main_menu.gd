@@ -6,6 +6,7 @@ const Icons = preload("res://scripts/icons.gd")
 var maps: Array
 var list: VBoxContainer
 var lbl_u: Label
+var lbl_bonus: Label
 var confirm: ConfirmationDialog
 var margin: MarginContainer
 var main_box: VBoxContainer
@@ -59,6 +60,10 @@ func _ready() -> void:
 	lbl_u.add_theme_font_override("font", GameData.font_bold)
 	lbl_u.add_theme_color_override("font_color", GameData.C_GEM)
 	ph.add_child(lbl_u)
+	lbl_bonus = Label.new()
+	lbl_bonus.theme_type_variation = "Muted"
+	lbl_bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(lbl_bonus)
 
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -246,6 +251,9 @@ func _fill() -> void:
 	for c in list.get_children():
 		c.queue_free()
 	lbl_u.text = "%d" % GameData.u
+	var bonus := int(round((GameData.coin_mult() - 1.0) * 100.0))
+	lbl_bonus.text = tr("Бонус монет +%d%%") % bonus
+	lbl_bonus.visible = bonus > 0
 	for i in maps.size():
 		var mp: Dictionary = maps[i]
 		var locked: bool = i >= GameData.maps_unlocked
