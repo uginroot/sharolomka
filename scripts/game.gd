@@ -1677,7 +1677,7 @@ func _draw_overlay() -> void:
 			var acol := Color(1.0, 0.85, 0.3, 0.95)
 			if reset_armed:
 				acol = Color(0.45, 0.85, 1.0, 0.95)
-			if sling_cancel:
+			if _sling_blocked():
 				acol = Color(1, 0.4, 0.4, 0.9)
 			var alen := (90.0 + 180.0 * minf(pull, SLING_R) / SLING_R) / zoom
 			var tip: Vector2 = lp + dir * alen
@@ -1864,6 +1864,10 @@ func _sling_begin(p: Vector2) -> void:
 
 
 ## Можно ли сейчас выстрелить: включён сброс или хватает денег на новый шар.
+func _sling_blocked() -> bool:
+	return sling_cancel or sling_from == null or not _can_shoot()
+
+
 func _can_shoot() -> bool:
 	return reset_armed or coins >= _ball_cost(selected)
 
@@ -1871,7 +1875,9 @@ func _can_shoot() -> bool:
 func _sling_move(p: Vector2) -> void:
 	sling_pos = p
 	var pull := sling_start - p
-	sling_cancel = pull.length() > SLING_R or sling_from == null or not _can_shoot()
+	# отмена — только вытягивание за область наведения; деньги и точку вылета проверяем каждый кадр
+	# (_sling_blocked), иначе после появления денег стрелка оставалась красной до движения пальца
+	sling_cancel = pull.length() > SLING_R
 	if pull.length() >= SLING_MIN and not sling_cancel:
 		aim_angle = _snap(rad_to_deg(pull.angle()))
 
@@ -1903,7 +1909,7 @@ func _draw_sling() -> void:
 	if not sling:
 		return
 	var pull := sling_start - sling_pos
-	var bad := sling_cancel or sling_from == null or not _can_shoot()
+	var bad := _sling_blocked()
 	var col := Color(1, 0.4, 0.4, 0.9) if bad else Color(1, 1, 1, 0.85)
 	# область наведения вокруг точки нажатия
 	sling_view.draw_circle(sling_start, SLING_R, Color(col.r, col.g, col.b, 0.06))

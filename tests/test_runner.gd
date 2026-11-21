@@ -1287,3 +1287,21 @@ func test_migration() -> void:
 	GameData.apply_settings()
 	GameData.save_settings()
 	GameData.reset_all()
+
+
+
+## Нет денег при начале прицела: стрелка красная, но как только монет хватает — можно стрелять без движения пальца.
+func test_sling_money_arrives() -> void:
+	var g = await new_game(2)
+	g.cam.position = g.start_pos
+	g._clamp_cam()
+	var c: Vector2 = (g.start_pos - g.cam.position) * g.zoom + get_viewport().get_visible_rect().size * 0.5
+	g.coins = 0
+	var n0: int = g.balls.size()
+	g._sling_begin(c)
+	g._sling_move(c + Vector2(0, 100))
+	check(g._sling_blocked(), "без денег рогатка не заблокирована")
+	g.coins = 1000   # деньги пришли, палец не двигался
+	check(not g._sling_blocked(), "деньги появились, а стрелка осталась красной до движения пальца")
+	g._sling_release()
+	check(g.balls.size() == n0 + 1, "после появления денег отпускание не выстрелило")
