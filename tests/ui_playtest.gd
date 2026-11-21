@@ -10,7 +10,7 @@ var out_dir := ""
 
 
 func _ready() -> void:
-	out_dir = ProjectSettings.globalize_path("res://build/screens")
+	out_dir = ProjectSettings.globalize_path("res://build/screens" + OS.get_environment("SCREENS_SUFFIX"))
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	# узел переезжает в корень, чтобы пережить смену сцен
 	_start.call_deferred()
@@ -192,6 +192,30 @@ func _run() -> void:
 	check(g.upg.visible, "окно прокачки открылось")
 	await _wait(0.4)
 	await _shot("upgrades")
+	# прокрутка списка пальцем, даже если палец лежит на кнопке (вкладка «Перки» длиннее экрана)
+	var tabs0: TabContainer = g.upg.find_children("*", "TabContainer", true, false)[0]
+	tabs0.current_tab = 1
+	await _wait(0.3)
+	var sc: ScrollContainer = tabs0.get_child(1)
+	var vbar := sc.get_v_scroll_bar()
+	var scrollable := vbar.max_value > vbar.page + 1.0
+	print("    прокрутка: содержимое %.0f, видно %.0f" % [vbar.max_value, vbar.page])
+	if scrollable:
+		var btn: Button = g.perk_refs["basic"]["perk"]
+		var sp: Vector2 = btn.get_global_rect().get_center()
+		var u0: int = GameData.u
+		_touch(sp, true)
+		await get_tree().process_frame
+		for k in 12:
+			_drag(sp - Vector2(0, 30 * (k + 1)), Vector2(0, -30))
+			await get_tree().process_frame
+		_touch(sp - Vector2(0, 360), false)
+		await _wait(0.3)
+		check(sc.scroll_vertical > 0, "список перков прокручивается пальцем с кнопки")
+		check(GameData.u == u0, "прокрутка не нажала кнопку покупки перка")
+		sc.scroll_vertical = 0
+	tabs0.current_tab = 0
+	await _wait(0.2)
 	var dmg0: int = g.dmg_lvl["basic"]
 	var dmg_btn: Button = g.shop_refs["basic"]["dmg"]["button"]
 	await _tap_at(dmg_btn.get_global_rect().get_center())

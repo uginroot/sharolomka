@@ -36,6 +36,7 @@ func _run() -> void:
 		var ok := failures == f0
 		print("%s  %s  (%d ms)" % ["PASS" if ok else "FAIL", n, Time.get_ticks_msec() - s0])
 	print("\n%d тестов, упало: %d, %.1f с" % [names.size(), failures, (Time.get_ticks_msec() - t0) / 1000.0])
+	print("Важно: ошибка скрипта внутри теста прерывает его без FAIL — ищите в выводе SCRIPT ERROR (CI это проверяет).")
 	get_tree().quit(failures)
 
 
@@ -646,3 +647,198 @@ func test_old_save_currency_key() -> void:
 	game = GAME.instantiate()
 	add_child(game)
 	check(game.coins == 12345, "монеты из старого ключа rubles не загрузились: %d" % game.coins)
+
+
+## Цены не переполняются на больших уровнях (раньше могли стать отрицательными), числа читаемы.
+func test_costs_no_overflow() -> void:
+	var g = await new_game(0)
+	for n in [0, 50, 150, 400, 2000]:
+		g.counts["basic"] = n
+		g.dmg_lvl["basic"] = n
+		g.spd_lvl["basic"] = mini(n, 10)
+		check(g._ball_cost("basic") > 0, "цена шара при n=%d: %d" % [n, g._ball_cost("basic")])
+		check(g._dmg_cost("basic") > 0, "цена урона при ур.%d: %d" % [n, g._dmg_cost("basic")])
+	g.counts["basic"] = 2000
+	g.coins = 1_000_000_000_000_000_000
+	var n0: int = g.balls.size()
+	g._fire(g.start_pos)
+	check(g.balls.size() == n0, "огромная цена позволила купить шар (раньше цена переполнялась в минус)")
+	g.coins = 4_100_000_000_000_000_000
+	g._fire(g.start_pos)
+	check(g.coins >= 0, "после покупки по предельной цене монеты ушли в минус")
+	for v in [999, 1500, 2_500_000, 3_000_000_000, 4_000_000_000_000, 5e15, 7e18]:
+		var s: String = GameData.fmt(v)
+		check(s.length() <= 7, "fmt(%s) = «%s» слишком длинно" % [str(v), s])
+
+
+## Генерация карт не зависит от встроенного hash() Godot (может поменяться в новой версии движка).
+func test_seed_stable() -> void:
+	var g = await new_game(0)
+	for id in ["meadow", "heart", "garden", "yard", "mountains", "ocean", "night"]:
+		check(g._seed_of(id) == hash(id), "сид %s: %d ≠ hash() %d" % [id, g._seed_of(id), hash(id)])
+	# значения зафиксированы: при их изменении все сохранённые карты «переедут»
+	var locked := {"meadow": 226223394, "heart": 261227161, "garden": 4282245238, "yard": 2090931477,
+		"mountains": 855852931, "ocean": 269460523, "night": 268492639}
+	for id in locked:
+		check(g._seed_of(id) == locked[id], "сид %s изменился: %d" % [id, g._seed_of(id)])
+
+
+## В сохранении открытой части хранится и тип клеток — карта не «переедет» при изменении генератора.
+func test_saved_chunks_keep_walls() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	fire_n(g, "basic", 20)
+	sim(g, 15.0)
+	g._save_state()
+	var f := FileAccess.open(g._save_path(), FileAccess.READ)
+	var d: Dictionary = f.get_var()
+	f.close()
+	var ok := 0
+	for ck in d["chunks"]:
+		var b: Array = d["chunks"][ck]
+		if int(b[1]) == 1024 * 6:
+			ok += 1
+	check(ok == d["chunks"].size() and ok > 0, "в сохранении кусков с типами клеток %d из %d" % [ok, d["chunks"].size()])
+	# подменяем генератор: стены из сохранения должны остаться на месте
+	var walls := {}
+	for ck in d["chunks"]:
+		var c = g.chunks[int(ck)]
+		for li in 1024:
+			if c.kind[li] == 2 and c.vis[li] == 1:
+				walls[Vector2i(int(ck), li)] = true
+	game.queue_free()
+	game = null
+	await get_tree().process_frame
+	game = GAME.instantiate()
+	game.set_meta("test_no_pictures", true)
+	add_child(game)
+	var moved := 0
+	for k in walls:
+		if game.chunks[k.x] == null or game.chunks[k.x].kind[k.y] != 2:
+			moved += 1
+	check(moved == 0, "видимые стены пропали после смены генератора: %d из %d" % [moved, walls.size()])
+
+
+## Повреждённый или недописанный файл сохранения не ломает игру; запись атомарная (через временный файл).
+func test_save_robust() -> void:
+	var g = await new_game(2)
+	g.coins = 777
+	g._save_state()
+	var path: String = g._save_path()
+	# недописанный временный файл (как будто телефон выключился посреди записи) не мешает загрузке
+	var t := FileAccess.open(path + ".tmp", FileAccess.WRITE)
+	t.store_string("мусор")
+	t.close()
+	game.queue_free()
+	game = null
+	await get_tree().process_frame
+	game = GAME.instantiate()
+	add_child(game)
+	check(game.coins == 777, "загрузка сломалась из-за недописанного временного файла")
+	# совсем битый основной файл — игра стартует, а не падает
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string("not a save")
+	f.close()
+	game.queue_free()
+	game = null
+	await get_tree().process_frame
+	game = GAME.instantiate()
+	add_child(game)
+	check(game.balls.size() >= 1, "игра не стартовала с битым сохранением")
+
+
+## Хаос-тест: тысяча случайных действий игрока; после каждого — проверка инвариантов.
+func test_chaos() -> void:
+	for map_i in [1, 3]:
+		var g = await new_game(map_i, func(): unlock_all(2, false))
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 777 + map_i
+		g.coins = 200000
+		var vs := get_viewport().get_visible_rect().size
+		for step in 1000:
+			var a := rng.randi() % 12
+			match a:
+				0, 1, 2:
+					g._select(GameData.TYPE_ORDER[rng.randi() % 5])
+					var lp = g._launch_from(g.start_pos + Vector2(rng.randf_range(-30, 30), rng.randf_range(-30, 30)))
+					if lp != null:
+						g.aim_angle = rng.randf_range(-180, 180)
+						g._fire(lp)
+				3:
+					g._buy_dmg(GameData.TYPE_ORDER[rng.randi() % 5])
+				4:
+					g._buy_spd(GameData.TYPE_ORDER[rng.randi() % 5])
+				5:
+					g._reset_stuck()
+				6:
+					var p := Vector2(rng.randf() * vs.x, rng.randf() * vs.y)
+					g._press_down(p)
+					g._hold_tick(0.3)
+					g._press_drag(p + Vector2(rng.randf_range(-200, 200), rng.randf_range(-200, 200)), Vector2.ZERO)
+					g._press_up()
+				7:
+					var p2 := Vector2(rng.randf() * vs.x, rng.randf() * vs.y)
+					g._press_down(p2)
+					g._press_drag(p2 + Vector2(40, 30), Vector2(40, 30))
+					g._press_up()
+				8:
+					g._set_zoom(g.zoom * rng.randf_range(0.5, 2.0), vs * 0.5)
+				9:
+					g._cycle_snap()
+				10:
+					g._show_upgrades(rng.randf() < 0.5)
+				11:
+					g._save_state()
+			sim(g, 0.2)
+			for b in g.balls:
+				var e := ball_position_ok(g, b)
+				if e != "":
+					check(false, "шаг %d: %s" % [step, e])
+					return
+			if g.coins < 0:
+				check(false, "шаг %d: монеты ушли в минус" % step)
+				return
+		var solid_bad := 0
+		for c in g.chunks:
+			if c == null:
+				continue
+			var s := 0
+			for li in 1024:
+				if c.kind[li] == 1 or c.kind[li] == 2:
+					s += 1
+			if s != c.solid:
+				solid_bad += 1
+		check(solid_bad == 0, "карта %d: расхождение solid в %d кусках" % [map_i, solid_bad])
+		var counted := {}
+		for b in g.balls:
+			counted[b.type] = int(counted.get(b.type, 0)) + 1
+		for t in GameData.TYPE_ORDER:
+			check(int(counted.get(t, 0)) == int(g.counts[t]), "карта %d: шаров %s %d, а куплено %d" % [map_i, t, int(counted.get(t, 0)), g.counts[t]])
+
+
+## Перерисовка поля не чаще 10 раз в секунду (батарея).
+func test_redraw_throttle() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	fire_n(g, "splash", 20)
+	var redraws := [0]
+	for c in g.chunks:
+		if c != null and c.node != null:
+			c.node.draw.connect(func(): redraws[0] += 1)
+	for f in 60:
+		await get_tree().process_frame
+	var per_chunk_frames: float = float(redraws[0]) / maxf(1.0, float(g.field_root.get_child_count()))
+	print("    перерисовок куска за 60 кадров: %.1f" % per_chunk_frames)
+	check(per_chunk_frames <= 12.0, "кусок перерисовывается %.1f раз за 60 кадров (больше 10/с)" % per_chunk_frames)
+
+
+## Повреждённый save.json (неверные типы полей) не роняет игру и не даёт мусорных значений.
+func test_corrupt_global_save() -> void:
+	var f := FileAccess.open(GameData.SAVE_PATH, FileAccess.WRITE)
+	f.store_string(JSON.stringify({"u": "много", "unlocked": [1, 2], "perks": {"basic": 99}, "maps_unlocked": -5,
+		"maps_done": "x", "map_states": 7, "lang_choice": "de"}))
+	f.close()
+	GameData.load_game()
+	check(GameData.u == 0, "u из строки: %s" % str(GameData.u))
+	check(GameData.perks["basic"] == GameData.PERK_MAX, "перк не ограничен максимумом: %d" % GameData.perks["basic"])
+	check(GameData.maps_unlocked >= 1, "открытых карт меньше одной")
+	check(typeof(GameData.map_states) == TYPE_DICTIONARY and typeof(GameData.maps_done) == TYPE_DICTIONARY, "словари из мусора")
+	GameData.reset_all()

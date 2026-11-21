@@ -93,6 +93,7 @@ var completed := false
 var field_root: Node2D
 var overlay: Node2D
 var dirty := {}
+var redraw_t := 0.0
 var lod := 0                     # 0 — с цифрами, 1 — «свет», 2 — грубо, по текстуре на кусок
 var ball_layer: Node2D
 var ball_tex: ImageTexture
@@ -146,6 +147,11 @@ var shop_box: VBoxContainer
 var perk_box: VBoxContainer
 var shop_refs := {}
 var perk_refs := {}
+var upg_tabs: TabContainer
+var tscroll_idx := -1           # палец, которым прокручивают окно прокачки
+var tscroll_start := Vector2.ZERO
+var tscroll_v0 := 0
+var tscroll_on := false
 var toast: PanelContainer
 var toast_label: Label
 var toast_t := 0.0
@@ -179,7 +185,7 @@ func _ready() -> void:
 	wpx = W * CELL
 	hpx = H * CELL
 	chunks.resize(cw * chh)
-	seed_i = hash(String(map["id"]))
+	seed_i = _seed_of(String(map["id"]))
 	@warning_ignore("integer_division")
 	start_cell = Vector2i(W / 2, H / 2)   # прохождение начинается из центра карты
 	start_pos = (Vector2(start_cell) + Vector2(0.5, 0.5)) * CELL
@@ -247,6 +253,15 @@ func _ready() -> void:
 
 # ================================================================ генерация мира
 
+## Сид карты: djb2 по символам id — те же значения, что даёт hash() в Godot 4.3, но без зависимости
+## от движка (если в новой версии hash() изменится, карты не «переедут» относительно сохранений).
+static func _seed_of(s: String) -> int:
+	var h := 5381
+	for i in s.length():
+		h = ((h << 5) + h + s.unicode_at(i)) & 0xffffffff
+	return h
+
+
 func _hash3(a: int, b: int, c: int) -> int:
 	var h := (a * 73856093) ^ (b * 19349663) ^ (c * 83492791)
 	h = (h ^ (h >> 13)) * 1274126177
@@ -300,10 +315,19 @@ func _gen_chunk(ck: int, blob: Array):
 		var raw: PackedByteArray = (blob[0] as PackedByteArray).decompress(int(blob[1]), FileAccess.COMPRESSION_ZSTD)
 		c.hp = raw.slice(0, CS * CS * 4).to_int32_array()
 		c.vis = raw.slice(CS * CS * 4, CS * CS * 5)
-		for li in CS * CS:
-			if c.kind[li] == 1 and c.hp[li] <= 0:
-				c.kind[li] = 0
-				solid -= 1
+		if raw.size() >= CS * CS * 6:
+			# с v0.15 в сохранении есть и типы клеток — открытая часть не зависит от генератора
+			c.kind = raw.slice(CS * CS * 5, CS * CS * 6)
+			solid = 0
+			for li in CS * CS:
+				var k: int = c.kind[li]
+				if k == 1 or k == 2:
+					solid += 1
+		else:
+			for li in CS * CS:
+				if c.kind[li] == 1 and c.hp[li] <= 0:
+					c.kind[li] = 0
+					solid -= 1
 		c.changed = true
 		c.blob = blob
 		c.blob_dirty = false
@@ -328,6 +352,8 @@ func _region(rx: int, ry: int):
 	var key := ry * 1000003 + rx
 	if region_cache.has(key):
 		return region_cache[key]
+	if has_meta("test_no_pictures"):   # только для теста «стены из сохранения не зависят от генератора»
+		return null
 	var res = null
 	if map.has("fixed"):
 		if rx == 0 and ry == 0:
@@ -636,6 +662,7 @@ func _save_state() -> void:
 		if c.blob_dirty:
 			var raw: PackedByteArray = c.hp.to_byte_array()
 			raw.append_array(c.vis)
+			raw.append_array(c.kind)
 			c.blob = [raw.compress(FileAccess.COMPRESSION_ZSTD), raw.size()]
 			c.blob_dirty = false
 		out[ck] = c.blob
@@ -646,10 +673,15 @@ func _save_state() -> void:
 		"balls": balls.map(func(b): return [b.type, b.pos.x, b.pos.y, b.vel.x, b.vel.y]),
 		"last_launch": [last_launch.x, last_launch.y], "aim": aim_angle, "selected": selected,
 	}
-	var f := FileAccess.open(_save_path(), FileAccess.WRITE)
-	if f:
-		f.store_var(s)
-		f.close()
+	# пишем во временный файл и переименовываем: если телефон выключится посреди записи,
+	# останется прежнее целое сохранение, а не обрезанный файл
+	var tmp := _save_path() + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_var(s)
+	f.close()
+	DirAccess.rename_absolute(tmp, _save_path())
 	GameData.map_states[String(map["id"])] = {"saved": true}
 	GameData.save_game()
 
@@ -693,16 +725,25 @@ func _recalc_stats() -> void:
 		st_sup[ti] = 1 if GameData.supers[t] else 0
 
 
+## Цена base·growth^n с потолком: без него на больших n float выходит за int64 и цена
+## становится отрицательной (шар покупался бесплатно — найдено ревью v0.15).
+const PRICE_CAP := 4.0e18
+
+
+static func _price(base: float, growth: float, n: int) -> int:
+	return int(minf(round(base * pow(growth, n)), PRICE_CAP))
+
+
 func _ball_cost(t: String) -> int:
-	return int(round(float(GameData.TYPES[t]["ball_cost"]) * pow(1.35, int(counts[t]))))
+	return _price(float(GameData.TYPES[t]["ball_cost"]), 1.35, int(counts[t]))
 
 
 func _dmg_cost(t: String) -> int:
-	return int(round(float(GameData.TYPES[t]["dmg_cost"]) * pow(1.55, int(dmg_lvl[t]))))
+	return _price(float(GameData.TYPES[t]["dmg_cost"]), 1.55, int(dmg_lvl[t]))
 
 
 func _spd_cost(t: String) -> int:
-	return int(round(float(GameData.TYPES[t]["spd_cost"]) * pow(1.6, int(spd_lvl[t]))))
+	return _price(float(GameData.TYPES[t]["spd_cost"]), 1.6, int(spd_lvl[t]))
 
 
 # ================================================================ симуляция
@@ -740,12 +781,14 @@ func _process(delta: float) -> void:
 		overlay_dirty = true
 
 	_redraw_dirty()
-	overlay.queue_redraw()   # прицел привязан к центру экрана — он дешёвый, рисуем каждый кадр
 	_hold_tick(delta)
-	var active := sling or press_pending
-	if active or sling_view.get_meta("was", false):
+	# прицел и подсказки перерисовываем, только пока они на экране (и один раз после — чтобы стереть)
+	var active := sling or press_pending or not popups.is_empty()
+	if active or overlay_dirty or sling_view.get_meta("was", false):
+		overlay.queue_redraw()
 		sling_view.queue_redraw()
 		sling_view.set_meta("was", active)
+		overlay_dirty = false
 	ball_layer.queue_redraw()
 
 	if toast_t > 0.0:
@@ -1063,10 +1106,9 @@ func _on_destroyed(x: int, y: int, id: int) -> void:
 	var rate := 250 * (3 if _mask_at(x, y) == 4 else 1)
 	if _hash3(x, y, seed_i + 7) % 10000 < rate:
 		GameData.u += 1
-		if true:
-			GameData.save_game()
-			popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "+1 U", "t": 1.5})
-			overlay_dirty = true
+		GameData.request_save()   # отложенно: при частых находках не дёргаем флеш-память
+		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "+1 U", "t": 1.5})
+		overlay_dirty = true
 	if poisons.has(id):
 		var p: Dictionary = poisons[id]
 		poisons.erase(id)
@@ -1161,10 +1203,14 @@ func _mark_all() -> void:
 			dirty[ck] = true
 
 
-## Перерисовываем только изменившиеся куски, которые видны на экране, и не больше 12 за кадр.
+## Перерисовываем только изменившиеся куски, которые видны на экране: не чаще 10 раз в секунду и не больше 12 за раз.
 func _redraw_dirty() -> void:
 	if dirty.is_empty():
 		return
+	redraw_t -= get_process_delta_time()
+	if redraw_t > 0.0:
+		return
+	redraw_t = 0.1   # не чаще 10 раз в секунду — для батареи
 	var view := _view_rect().grow(CPX * 0.5)
 	var done := 0
 	for ck in dirty.keys():
@@ -1425,6 +1471,44 @@ func _over_ui(p: Vector2) -> bool:
 	if upg.visible:
 		return true
 	return top_bar.get_global_rect().has_point(p) or bottom_bar.get_global_rect().has_point(p)
+
+
+## Прокрутка окна прокачки пальцем, даже если палец лёг на кнопку: в Godot 4.3 кнопка захватывает
+## касание, и ScrollContainer его не получает (на экранах 16:9 «Перки» длиннее экрана).
+## Сдвиг по вертикали > 14 px — это прокрутка, и нажатие кнопки под пальцем отменяется.
+func _input(e: InputEvent) -> void:
+	if upg == null or not upg.visible:
+		return
+	var sc := upg_tabs.get_current_tab_control() as ScrollContainer
+	if sc == null:
+		return
+	if e is InputEventScreenTouch:
+		if e.pressed and tscroll_idx < 0 and sc.get_global_rect().has_point(e.position):
+			tscroll_idx = e.index
+			tscroll_start = e.position
+			tscroll_v0 = sc.scroll_vertical
+			tscroll_on = false
+		elif not e.pressed and e.index == tscroll_idx:
+			tscroll_idx = -1
+			if tscroll_on:
+				tscroll_on = false
+				get_viewport().set_input_as_handled()
+	elif e is InputEventScreenDrag and e.index == tscroll_idx:
+		var dy: float = e.position.y - tscroll_start.y
+		if not tscroll_on and absf(dy) > 14.0:
+			# отменяем нажатие кнопки: «отпускаем» мышь далеко за экраном — кнопка не сработает
+			var r := InputEventMouseButton.new()
+			r.button_index = MOUSE_BUTTON_LEFT
+			r.pressed = false
+			r.position = Vector2(-10000, -10000)
+			r.global_position = r.position
+			Input.parse_input_event(r)
+			tscroll_on = true
+		if tscroll_on:
+			sc.scroll_vertical = tscroll_v0 - int(dy)
+			get_viewport().set_input_as_handled()
+	elif tscroll_on and e is InputEventMouse and e.device == InputEvent.DEVICE_ID_EMULATION:
+		get_viewport().set_input_as_handled()   # эмулированная мышь во время прокрутки не трогает кнопки
 
 
 ## Один палец: сразу повёл — перемещение карты; нажал и подержал HOLD_TIME — прицел-рогатка
@@ -1955,6 +2039,7 @@ func _build_ui() -> void:
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	uv.add_child(tabs)
+	upg_tabs = tabs
 	for k in 2:
 		var sc := ScrollContainer.new()
 		sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

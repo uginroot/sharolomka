@@ -54,7 +54,12 @@ jobs:
         run: ~/godot/godot --headless --path . --import || true
 
       - name: Run tests
-        run: ~/godot/godot --headless --path . res://tests/test_runner.tscn
+        shell: bash
+        run: |
+          set -o pipefail
+          ~/godot/godot --headless --path . res://tests/test_runner.tscn 2>&1 | tee tests.log
+          # ошибка скрипта прерывает тест без FAIL — считаем её падением
+          if grep -q "SCRIPT ERROR" tests.log; then echo "::error::SCRIPT ERROR в тестах"; exit 1; fi
 
   ui-tests:
     name: UI-тесты и скриншоты
@@ -101,14 +106,23 @@ jobs:
         run: ~/godot/godot --headless --path . --import || true
 
       - name: Run UI playtest
-        run: xvfb-run -a -s "-screen 0 800x1700x24" ~/godot/godot --path . --rendering-driver opengl3 --resolution 720x1600 res://tests/ui_playtest.tscn
+        shell: bash
+        run: |
+          set -o pipefail
+          xvfb-run -a -s "-screen 0 800x1700x24" ~/godot/godot --path . --rendering-driver opengl3 --resolution 720x1600 res://tests/ui_playtest.tscn 2>&1 | tee ui.log
+          if grep -q "SCRIPT ERROR" ui.log; then echo "::error::SCRIPT ERROR в UI-тесте"; exit 1; fi
+          # второй прогон на экране 16:9 — там окно прокачки длиннее экрана и проверяется прокрутка
+          SCREENS_SUFFIX=_16x9 xvfb-run -a -s "-screen 0 800x1400x24" ~/godot/godot --path . --rendering-driver opengl3 --resolution 720x1280 res://tests/ui_playtest.tscn 2>&1 | tee ui169.log
+          if grep -q "SCRIPT ERROR" ui169.log; then echo "::error::SCRIPT ERROR в UI-тесте 16:9"; exit 1; fi
 
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: build/screens/*.png
+          path: |
+            build/screens/*.png
+            build/screens_16x9/*.png
 
   export:
     name: ${{ matrix.preset }}

@@ -108,15 +108,42 @@ func _reset_defaults() -> void:
 	map_states = {}
 
 
+var _save_pending := false
+var _save_wait := 0.0
+
+
+## Отложенное сохранение: не чаще раза в 3 с (U-баллы находятся часто).
+func request_save() -> void:
+	_save_pending = true
+
+
+func _process(delta: float) -> void:
+	if _save_pending:
+		_save_wait += delta
+		if _save_wait >= 3.0:
+			save_game()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		if _save_pending:
+			save_game()
+
+
 func save_game() -> void:
+	_save_pending = false
+	_save_wait = 0.0
 	var data := {
 		"u": u, "unlocked": unlocked, "perks": perks, "supers": supers,
 		"maps_unlocked": maps_unlocked, "maps_done": maps_done, "map_states": map_states,
 		"eco_mode": eco_mode, "keep_screen": keep_screen, "lang_choice": lang_choice,
 	}
-	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	# атомарно: временный файл + переименование
+	var f := FileAccess.open(SAVE_PATH + ".tmp", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
+		f.close()
+		DirAccess.rename_absolute(SAVE_PATH + ".tmp", SAVE_PATH)
 
 
 func load_game() -> void:
@@ -128,21 +155,26 @@ func load_game() -> void:
 	var data = JSON.parse_string(f.get_as_text())
 	if typeof(data) != TYPE_DICTIONARY:
 		return
-	u = int(data.get("u", 0))
-	var ul: Dictionary = data.get("unlocked", {})
-	var pk: Dictionary = data.get("perks", {})
-	var sp: Dictionary = data.get("supers", {})
+	# повреждённый или чужой файл не должен ронять игру: каждое поле проверяем по типу
+	u = maxi(0, int(data.get("u", 0))) if typeof(data.get("u", 0)) in [TYPE_INT, TYPE_FLOAT] else 0
+	var ul: Dictionary = _dict(data.get("unlocked", {}))
+	var pk: Dictionary = _dict(data.get("perks", {}))
+	var sp: Dictionary = _dict(data.get("supers", {}))
 	for t in TYPE_ORDER:
 		unlocked[t] = bool(ul.get(t, t == "basic"))
-		perks[t] = int(pk.get(t, 0))
+		perks[t] = clampi(int(pk.get(t, 0)), 0, PERK_MAX) if typeof(pk.get(t, 0)) in [TYPE_INT, TYPE_FLOAT] else 0
 		supers[t] = bool(sp.get(t, false))
-	maps_unlocked = int(data.get("maps_unlocked", 1))
-	maps_done = data.get("maps_done", {})
-	map_states = data.get("map_states", {})
+	maps_unlocked = maxi(1, int(data.get("maps_unlocked", 1))) if typeof(data.get("maps_unlocked", 1)) in [TYPE_INT, TYPE_FLOAT] else 1
+	maps_done = _dict(data.get("maps_done", {}))
+	map_states = _dict(data.get("map_states", {}))
 	eco_mode = bool(data.get("eco_mode", false))
 	keep_screen = bool(data.get("keep_screen", false))
 	# старый ключ "lang" записывался автоматически — не считаем его выбором игрока
 	lang_choice = String(data.get("lang_choice", ""))
+
+
+static func _dict(v) -> Dictionary:
+	return v if typeof(v) == TYPE_DICTIONARY else {}
 
 
 func reset_all() -> void:
@@ -299,12 +331,15 @@ func make_theme() -> Theme:
 	return th
 
 
+## Короткая запись числа: 999, 1.5K, 2.5M, 3.0B, 4.0T, 5.0Qa, дальше 6.0e18.
 static func fmt(n) -> String:
 	var v := float(n)
 	if v < 1000.0:
 		return str(int(v))
-	if v < 1e6:
-		return "%.1fK" % (v / 1000.0)
-	if v < 1e9:
-		return "%.1fM" % (v / 1e6)
-	return "%.1fB" % (v / 1e9)
+	var units := ["K", "M", "B", "T", "Qa"]
+	var e := 3
+	for u in units:
+		if v < pow(10.0, e + 3):
+			return "%.1f%s" % [v / pow(10.0, e), u]
+		e += 3
+	return "%.1fe%d" % [v / pow(10.0, floor(log(v) / log(10.0))), int(floor(log(v) / log(10.0)))]
