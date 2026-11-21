@@ -274,6 +274,12 @@ func _run() -> void:
 	await _wait(1.0)
 	check(await _tap("Настройки"), "в меню есть «Настройки»")
 	await _wait(0.3)
+	await _shot("settings_ru")
+	var mset = get_tree().current_scene
+	var sc_set: ScrollContainer = mset.settings_scroll
+	var bar_set := sc_set.get_v_scroll_bar()
+	print("    настройки: содержимое %.0f, видно %.0f" % [bar_set.max_value, bar_set.page])
+	check(_find(mset, "Вкл") != null, "в настройках есть переключатели (музыка, звуки, вибрация)")
 	check(await _tap("English"), "в настройках можно выбрать English")
 	await _wait(1.0)
 	check(GameData.lang == "en", "язык переключился на английский")

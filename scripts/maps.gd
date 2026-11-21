@@ -97,12 +97,16 @@ static func get_map(i: int) -> Dictionary:
 		"goal": int(minf(GOAL_BASE * (1.0 + GOAL_STEP * (lv - 1)), 1.0e15)),
 		"region": rng.randi_range(44, 72), "density": rng.randf_range(0.6, 0.78),
 		"templates": theme["templates"], "floor": theme["floor"], "hue": theme["hue"],
+		"layout": LAYOUTS[(lv * 7 + rng.randi() % 3) % LAYOUTS.size()],
 	}
 
 
 ## Бесконечные уровни растут линейно — в том же темпе, что и бонус монет (+25% за карту).
 ## Экспоненциальный рост делал далёкие уровни непроходимыми на старте (каждая карта начинается
 ## с одного шара) и переполнял числа (тест test_endless_levels). Подобрано симулятором баланса.
+## Узоры раскладки картинок (см. game.gd → _layout_slot).
+const LAYOUTS := ["rings", "rays", "spiral", "checker", "mosaic"]
+
 const HP_BASE := 4.0
 const HP_STEP := 0.35
 const GOAL_BASE := 300000
@@ -126,19 +130,19 @@ static func get_maps() -> Array:
 			"hp_base": 1.0, "hp_growth": 0.30, "goal": 0, "fixed": [["house", Rect2i(5, 0, 10, 9)], ["heart", Rect2i(6, 16, 8, 8)]]},
 		{"id": "heart", "u_rate": 40, "name": "Сердце", "w": 40, "h": 48, "aim": -70.0,
 			"hp_base": 1.5, "hp_growth": 0.25, "goal": 0, "fixed": [["heart", Rect2i(9, 1, 22, 19)], ["heart", Rect2i(14, 30, 13, 13)]]},
-		{"id": "garden", "u_rate": 12, "name": "Сад", "w": 100, "h": 120, "aim": -70.0,
+		{"id": "garden", "layout": "mosaic", "u_rate": 12, "name": "Сад", "w": 100, "h": 120, "aim": -70.0,
 			"hp_base": 2.0, "hp_growth": 0.12, "goal": 0, "region": 30, "density": 0.85,
 			"templates": ["tree", "house", "heart", "mushroom"]},
-		{"id": "yard", "u_rate": 5, "name": "Кошачий двор", "w": 300, "h": 360, "aim": -70.0,
+		{"id": "yard", "layout": "rings", "u_rate": 5, "name": "Кошачий двор", "w": 300, "h": 360, "aim": -70.0,
 			"hp_base": 2.5, "hp_growth": 0.06, "goal": 60000, "region": 40, "density": 0.75,
 			"templates": ["cat", "yarn", "fish", "house", "heart"]},
-		{"id": "mountains", "u_rate": 3, "name": "Горы", "w": 1000, "h": 1200, "aim": -70.0,
+		{"id": "mountains", "layout": "rays", "u_rate": 3, "name": "Горы", "w": 1000, "h": 1200, "aim": -70.0,
 			"hp_base": 3.0, "hp_growth": 0.03, "goal": 300000, "region": 48, "density": 0.7,
 			"templates": ["mountain", "moon", "star", "tree", "mushroom"]},
-		{"id": "ocean", "u_rate": 2, "name": "Океан", "w": 3000, "h": 3600, "aim": -70.0,
+		{"id": "ocean", "layout": "spiral", "u_rate": 2, "name": "Океан", "w": 3000, "h": 3600, "aim": -70.0,
 			"hp_base": 3.5, "hp_growth": 0.02, "goal": 400000, "region": 56, "density": 0.65,
 			"templates": ["fish", "star", "moon", "heart", "yarn"]},
-		{"id": "night", "u_rate": 2, "name": "Звёздная ночь", "w": 10000, "h": 10000, "aim": -70.0,
+		{"id": "night", "layout": "rings", "u_rate": 2, "name": "Звёздная ночь", "w": 10000, "h": 10000, "aim": -70.0,
 			"hp_base": 4.0, "hp_growth": 0.015, "goal": 450000, "region": 64, "density": 0.65,
 			"templates": all},
 	]

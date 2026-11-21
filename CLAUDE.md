@@ -37,6 +37,10 @@ xvfb-run -a -s "-screen 0 800x1700x24" godot --path . --rendering-driver opengl3
 - Осторожно: `pkill -f <слово>` убивает и собственную оболочку, если слово есть в её команде —
   останавливай по шаблону вида `pgrep -f "[G]odot.*endless_quick"`.
 
+## Звук
+- Музыка и звуки — из кода: `pip install numpy soundfile && python3 tools/gen_audio.py` → `audio/*.ogg`.
+  Новый звук: добавь в генератор и в `Sfx.SOUNDS` (`scripts/audio.gd`); частые — с ограничением в `MIN_GAP`.
+
 ## Релиз
 - push в `main` → CI: тесты → UI-тесты → сборки (артефакты в Actions, там же скриншоты).
 - Релиз: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Release с APK, zip (Windows), tar.gz (Linux).

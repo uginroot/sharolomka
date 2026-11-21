@@ -12,6 +12,8 @@ var confirm: ConfirmationDialog
 var margin: MarginContainer
 var main_box: VBoxContainer
 var settings_box: VBoxContainer
+var settings_root: VBoxContainer
+var settings_scroll: ScrollContainer
 
 
 func _ready() -> void:
@@ -85,11 +87,34 @@ func _ready() -> void:
 	vb.add_child(bset)
 	main_box = vb
 
-	# --- экран настроек
+	# --- экран настроек: прокручиваемый список + кнопки внизу
+	settings_root = VBoxContainer.new()
+	settings_root.add_theme_constant_override("separation", 12)
+	settings_root.visible = false
+	margin.add_child(settings_root)
+	settings_scroll = ScrollContainer.new()
+	settings_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	settings_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	settings_root.add_child(settings_scroll)
 	settings_box = VBoxContainer.new()
+	settings_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	settings_box.add_theme_constant_override("separation", 14)
-	settings_box.visible = false
-	margin.add_child(settings_box)
+	settings_scroll.add_child(settings_box)
+	var ts2 = TouchScroll.new()
+	ts2.target = settings_scroll
+	add_child(ts2)
+	var reset := Button.new()
+	reset.text = tr("Сбросить весь прогресс")
+	reset.custom_minimum_size.y = 54
+	reset.modulate = Color(1, 0.75, 0.75, 0.85)
+	reset.pressed.connect(_ask_reset)
+	settings_root.add_child(reset)
+	var back := Button.new()
+	back.text = tr("Назад")
+	back.theme_type_variation = "AccentButton"
+	back.custom_minimum_size.y = 60
+	back.pressed.connect(_show_settings.bind(false))
+	settings_root.add_child(back)
 
 	confirm = ConfirmationDialog.new()
 	confirm.title = tr("Сброс")
@@ -122,7 +147,7 @@ func _apply_margins() -> void:
 
 func _show_settings(show: bool) -> void:
 	main_box.visible = not show
-	settings_box.visible = show
+	settings_root.visible = show
 	if show:
 		_fill_settings()
 	else:
@@ -202,21 +227,9 @@ func _fill_settings() -> void:
 	_setting_row(tr("Экономия батареи"), tr("30 кадров в секунду вместо 60"), _toggle(GameData.eco_mode, _toggle_eco))
 	_setting_row(tr("Не гасить экран"), tr("Пока открыта игра"), _toggle(GameData.keep_screen, _toggle_screen))
 
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	settings_box.add_child(spacer)
-	var reset := Button.new()
-	reset.text = tr("Сбросить весь прогресс")
-	reset.custom_minimum_size.y = 54
-	reset.modulate = Color(1, 0.75, 0.75, 0.85)
-	reset.pressed.connect(_ask_reset)
-	settings_box.add_child(reset)
-	var back := Button.new()
-	back.text = tr("Назад")
-	back.theme_type_variation = "AccentButton"
-	back.custom_minimum_size.y = 60
-	back.pressed.connect(_show_settings.bind(false))
-	settings_box.add_child(back)
+	_setting_row(tr("Музыка"), "", _toggle(GameData.music_on, _toggle_music))
+	_setting_row(tr("Звуки игры"), "", _toggle(GameData.sfx_on, _toggle_sfx))
+	_setting_row(tr("Вибрация"), tr("Короткий отклик, когда начинается прицел"), _toggle(GameData.vibration_on, _toggle_vibration))
 
 
 func _set_lang(l: String) -> void:
@@ -232,6 +245,27 @@ func _toggle_eco() -> void:
 	GameData.eco_mode = not GameData.eco_mode
 	GameData.apply_settings()
 	GameData.save_game()
+	_fill_settings()
+
+
+func _toggle_music() -> void:
+	GameData.music_on = not GameData.music_on
+	Sfx.apply()
+	GameData.save_game()
+	_fill_settings()
+
+
+func _toggle_sfx() -> void:
+	GameData.sfx_on = not GameData.sfx_on
+	Sfx.apply()
+	GameData.save_game()
+	_fill_settings()
+
+
+func _toggle_vibration() -> void:
+	GameData.vibration_on = not GameData.vibration_on
+	GameData.save_game()
+	GameData.vibrate(25)   # сразу показать, как ощущается
 	_fill_settings()
 
 
@@ -332,7 +366,7 @@ func _open(i: int) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
-		if settings_box != null and settings_box.visible:
+		if settings_root != null and settings_root.visible:
 			_show_settings(false)
 		else:
 			get_tree().quit()

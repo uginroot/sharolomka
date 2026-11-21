@@ -115,4 +115,8 @@ const T := {
 	"Мастерство": "Ustalık",
 	"+10% урона всех шаров за уровень, без предела": "Seviye başına tüm toplara +%10 hasar, sınırsız",
 	"Уровень %d → %d · %d": "Seviye %d → %d · %d",
+	"Музыка": "Müzik",
+	"Звуки игры": "Oyun sesleri",
+	"Вибрация": "Titreşim",
+	"Короткий отклик, когда начинается прицел": "Nişan almaya başlayınca kısa titreşim",
 }

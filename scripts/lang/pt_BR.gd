@@ -115,4 +115,8 @@ const T := {
 	"Мастерство": "Maestria",
 	"+10% урона всех шаров за уровень, без предела": "+10% de dano para todas as bolas por nível, sem limite",
 	"Уровень %d → %d · %d": "Nível %d → %d · %d",
+	"Музыка": "Música",
+	"Звуки игры": "Sons do jogo",
+	"Вибрация": "Vibração",
+	"Короткий отклик, когда начинается прицел": "Uma vibração curta quando a mira começa",
 }

@@ -17,6 +17,7 @@ run/max_fps=60
 [autoload]
 
 GameData="*res://scripts/game_data.gd"
+Sfx="*res://scripts/audio.gd"
 
 [debug]
 

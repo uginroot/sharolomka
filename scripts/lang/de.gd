@@ -115,4 +115,8 @@ const T := {
 	"Мастерство": "Meisterschaft",
 	"+10% урона всех шаров за уровень, без предела": "+10 % Schaden für alle Kugeln pro Stufe, ohne Grenze",
 	"Уровень %d → %d · %d": "Stufe %d → %d · %d",
+	"Музыка": "Musik",
+	"Звуки игры": "Spielsounds",
+	"Вибрация": "Vibration",
+	"Короткий отклик, когда начинается прицел": "Kurzes Feedback, wenn das Zielen beginnt",
 }

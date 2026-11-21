@@ -28,6 +28,9 @@ const WALL_LIGHT := Color(1, 1, 1)
 const WALL_DARK := Color(0.6, 0.64, 0.74)
 const WALL_SEAM := Color(0.8, 0.83, 0.9)
 const GRID := Color(1, 1, 1, 0.055)
+const FOG_GRID := Color(1, 1, 1, 0.03)       # сетка в тумане — ещё прозрачнее
+const OUTSIDE := Color(0.03, 0.035, 0.05)     # за пределами карты — темнее тумана
+const BORDER := Color(0.55, 0.68, 1.0, 0.85)  # граница карты
 const SLING_R := 230.0          # радиус области наведения рогатки, px экрана
 const SLING_MIN := 28.0         # меньше — это касание, а не оттягивание
 const HOLD_TIME := 0.22         # удержание пальца на месте до начала прицеливания, с
@@ -102,6 +105,9 @@ var completed := false
 
 # ---- отрисовка
 var field_root: Node2D
+var frame_node: Node2D           # сетка в тумане и затемнение за картой (под кусками)
+var border_node: Node2D          # граница карты (над кусками)
+var _frame_key := Vector3.ZERO
 var floor_col := FLOOR           # цвет пола — у бесконечных уровней свой по теме
 var hue_shift := 0.0             # сдвиг оттенка квадратов по теме
 var overlay: Node2D
@@ -209,8 +215,14 @@ func _ready() -> void:
 	ey0 = start_cell.y
 	ey1 = start_cell.y
 
+	frame_node = Node2D.new()
+	add_child(frame_node)
+	frame_node.draw.connect(_draw_frame)
 	field_root = Node2D.new()
 	add_child(field_root)
+	border_node = Node2D.new()
+	add_child(border_node)
+	border_node.draw.connect(_draw_border)
 	# шарики: одна текстура на всех — Godot склеивает их в один вызов отрисовки
 	ball_layer = Node2D.new()
 	add_child(ball_layer)
@@ -374,8 +386,6 @@ func _region(rx: int, ry: int):
 		if rx == 0 and ry == 0:
 			res = _build_picture(map["fixed"], Rect2i(0, 0, W, H))
 	else:
-		var rng := RandomNumberGenerator.new()
-		rng.seed = _hash3(rx, ry, seed_i)
 		var x0 := rx * region_size
 		var y0 := ry * region_size
 		var has_start := Rect2i(x0 - 3, y0 - 3, region_size + 6, region_size + 6).has_point(start_cell)
@@ -383,15 +393,65 @@ func _region(rx: int, ry: int):
 		var span_x := mini(region_size, W - x0) - 6
 		var span_y := mini(region_size, H - y0) - 6
 		var span := mini(span_x, span_y)
-		if rng.randf() < float(map["density"]) and not has_start and span >= 12:
-			var tl: Array = map["templates"]
-			var tpl: String = tl[rng.randi() % tl.size()]
-			var size := maxi(12, int(span * rng.randf_range(0.5, 1.0)))
-			var px := x0 + 3 + rng.randi_range(0, span_x - size)
-			var py := y0 + 3 + rng.randi_range(0, span_y - size)
-			res = _build_picture([[tpl, Rect2i(px, py, size, size)]], Rect2i(px - 1, py - 1, size + 2, size + 2))
+		var slot := [] if has_start or span < 12 else _layout_slot(rx, ry)
+		if not slot.is_empty():
+			var size := maxi(12, int(span * float(slot[1])))
+			# по центру региона — раскладка читается как задуманный рисунок
+			@warning_ignore("integer_division")
+			var px := x0 + 3 + (span_x - size) / 2
+			@warning_ignore("integer_division")
+			var py := y0 + 3 + (span_y - size) / 2
+			res = _build_picture([[slot[0], Rect2i(px, py, size, size), slot[2]]], Rect2i(px - 1, py - 1, size + 2, size + 2))
 	region_cache[key] = res
 	return res
+
+
+## Раскладка картинок по регионам — узор вокруг старта, а не случайная россыпь:
+##   rings  — концентрические кольца, в каждом свой мотив;  rays   — 8 лучей от центра;
+##   spiral — три рукава спирали;  checker — шахматка;  mosaic — сетка с чередованием мотивов.
+## Размер растёт от центра к краю; на левой половине картинки зеркальные — карта симметрична.
+## Возвращает [шаблон, доля размера региона, зеркально] или [] — регион пустой.
+func _layout_slot(rx: int, ry: int) -> Array:
+	var R := float(region_size)
+	var c := (Vector2(rx, ry) + Vector2(0.5, 0.5)) * R
+	var d := c - (Vector2(start_cell) + Vector2(0.5, 0.5))
+	var dist := d.length() / R
+	if dist < 1.2:
+		return []
+	var ring := int(round(dist))
+	var tl: Array = map["templates"]
+	var n := tl.size()
+	var ang := atan2(d.y, d.x)
+	@warning_ignore("integer_division")
+	var srx: int = start_cell.x / region_size
+	@warning_ignore("integer_division")
+	var sry: int = start_cell.y / region_size
+	var ax := absi(rx - srx)
+	var ay := absi(ry - sry)
+	var occ := true
+	var tpl: String = tl[ring % n]
+	match String(map.get("layout", "rings")):
+		"rings":
+			occ = ring % 3 != 0
+		"rays":
+			var step := TAU / 8.0
+			var a2 := fposmod(ang + step * 0.5, step) - step * 0.5
+			occ = absf(a2) * dist < 0.75 or ring % 4 == 0
+		"spiral":
+			var arm := fposmod(ang / TAU * 3.0 - dist * 0.16, 1.0)
+			occ = arm < 0.62
+			tpl = tl[int(fposmod(ang / TAU * 3.0 - dist * 0.16, 3.0)) % n]
+		"checker":
+			occ = (ax + ay) % 2 == 0
+			@warning_ignore("integer_division")
+			tpl = tl[((ax + ay) / 2) % n]
+		"mosaic":
+			occ = ax % 2 == 0 or ay % 2 == 0
+			tpl = tl[(ax + 2 * ay) % n]
+	if not occ:
+		return []
+	var frac := 0.7 + 0.25 * clampf((dist - 1.0) / 5.0, 0.0, 1.0)
+	return [tpl, frac, d.x < 0.0]
 
 
 ## Растеризует картинки в маску: контур — стена, внутри — полость, со стороны старта — вход.
@@ -405,10 +465,12 @@ func _build_picture(items: Array, box: Rect2i) -> Dictionary:
 	var polys: Array = []
 	for it in items:
 		var r: Rect2i = it[1]
+		var flip: bool = it.size() > 2 and it[2]
 		for p in templates[it[0]]:
 			var q := PackedVector2Array()
 			for v in p:
-				q.append(Vector2(r.position - box.position) + v * Vector2(r.size))
+				var u: Vector2 = Vector2(1.0 - v.x, v.y) if flip else v   # зеркало для левой половины
+				q.append(Vector2(r.position - box.position) + u * Vector2(r.size))
 			polys.append(q)
 	var outlines: Array = []
 	for q in polys:
@@ -810,6 +872,12 @@ func _process(delta: float) -> void:
 		overlay_dirty = true
 
 	_redraw_dirty()
+	# сетка в тумане и граница зависят от камеры — перерисовываем, только когда она сдвинулась
+	var key := Vector3(cam.position.x, cam.position.y, zoom) if cam != null else Vector3.ZERO
+	if key != _frame_key:
+		_frame_key = key
+		frame_node.queue_redraw()
+		border_node.queue_redraw()
 	_hold_tick(delta)
 	# прицел и подсказки перерисовываем, только пока они на экране (и один раз после — чтобы стереть)
 	var active := sling or press_pending or not popups.is_empty()
@@ -1018,6 +1086,7 @@ func _move_ball(b, delta: float) -> void:
 
 ## Возвращает true, если шарик пролетает сквозь квадрат.
 func _hit_cell(b, id: int) -> bool:
+	Sfx.play("hit", 0.15)
 	var ti: int = b.ti
 	var dmg := st_dmg[ti] * (2 if frenzy_t > 0.0 else 1)
 	var lvl := st_lvl[ti]
@@ -1128,6 +1197,7 @@ func _damage(id: int, amount: int, b) -> void:
 		b.earned += dealt
 	_mark(ck)
 	if h - dealt <= 0:
+		Sfx.play("break", 0.12)
 		c.kind[li] = 0
 		c.solid -= 1
 		destroyed += 1
@@ -1138,10 +1208,11 @@ func _damage(id: int, amount: int, b) -> void:
 func _on_destroyed(x: int, y: int, id: int) -> void:
 	_reveal(x, y)
 	# U-баллы спрятаны в части квадратов (в полостях картинок — чаще)
-	var rate := int(map.get("u_rate", 10)) * (3 if _mask_at(x, y) == 4 else 1)
+	var rate := int(map.get("u_rate", 10)) * (2 if _mask_at(x, y) == 4 else 1)
 	if _hash3(x, y, seed_i + 7) % 10000 < rate:
 		GameData.u += 1
 		GameData.request_save()   # отложенно: при частых находках не дёргаем флеш-память
+		Sfx.play("u", 0.03)
 		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "+1 U", "t": 1.5})
 		overlay_dirty = true
 	var c = chunks[(x >> 5) + (y >> 5) * cw]
@@ -1151,6 +1222,7 @@ func _on_destroyed(x: int, y: int, id: int) -> void:
 		frenzy_t = minf(maxf(frenzy_t, 0.0) + FRENZY_TIME, FRENZY_TIME * 2.0)   # копится, но не больше 30 с
 		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "×2!", "t": 1.5})
 		_show_toast(tr("Золотой квадрат! Урон ×2 на %d с") % int(FRENZY_TIME))
+		Sfx.play("gold", 0.0)
 	if poisons.has(id):
 		var p: Dictionary = poisons[id]
 		poisons.erase(id)
@@ -1207,6 +1279,7 @@ func _start_finale() -> void:
 					_ensure_node(ck)
 				_mark(ck)
 	_finale_field()
+	Sfx.play("finale", 0.0)
 	_show_toast(tr("Финал: осталось %d — шары летят к последним квадратам") % finale_ids.size())
 
 
@@ -1283,6 +1356,7 @@ func _check_goal() -> void:
 		GameData.maps_unlocked = maxi(GameData.maps_unlocked, map_index + 2)
 		GameData.save_game()
 		if not (track_all and alive <= 0):
+			Sfx.play("goal", 0.0)
 			_show_toast(tr("Цель карты выполнена!\n+%d U, +%d%% монет навсегда, открыта следующая карта") % [reward, int(GameData.MAP_BONUS * 100)])
 	if track_all and alive <= 0 and not completed:
 		completed = true
@@ -1514,6 +1588,48 @@ func _launch_from(w: Vector2):
 	return p
 
 
+## Сетка в тумане (только вблизи) и затемнение за пределами карты — в пределах экрана.
+func _draw_frame() -> void:
+	var v := _view_rect().grow(CELL)
+	var world := Rect2(0, 0, wpx, hpx)
+	# за картой — темнее тумана, чтобы край читался даже без рамки
+	if v.position.x < 0.0:
+		frame_node.draw_rect(Rect2(v.position.x, v.position.y, -v.position.x, v.size.y), OUTSIDE)
+	if v.end.x > wpx:
+		frame_node.draw_rect(Rect2(wpx, v.position.y, v.end.x - wpx, v.size.y), OUTSIDE)
+	if v.position.y < 0.0:
+		frame_node.draw_rect(Rect2(maxf(v.position.x, 0.0), v.position.y, minf(v.end.x, wpx) - maxf(v.position.x, 0.0), -v.position.y), OUTSIDE)
+	if v.end.y > hpx:
+		frame_node.draw_rect(Rect2(maxf(v.position.x, 0.0), hpx, minf(v.end.x, wpx) - maxf(v.position.x, 0.0), v.end.y - hpx), OUTSIDE)
+	if lod != 0:
+		return
+	var r := v.intersection(world)
+	if r.size.x <= 0.0 or r.size.y <= 0.0:
+		return
+	var x0 := floorf(r.position.x / CELL) * CELL
+	var y0 := floorf(r.position.y / CELL) * CELL
+	var gl := PackedVector2Array()
+	var x := x0
+	while x <= r.end.x:
+		gl.append(Vector2(x, r.position.y))
+		gl.append(Vector2(x, r.end.y))
+		x += CELL
+	var y := y0
+	while y <= r.end.y:
+		gl.append(Vector2(r.position.x, y))
+		gl.append(Vector2(r.end.x, y))
+		y += CELL
+	frame_node.draw_multiline(gl, FOG_GRID)
+
+
+## Граница карты: яркая рамка поверх кусков (видна, когда край карты на экране).
+func _draw_border() -> void:
+	var w := maxf(3.0, 4.0 / zoom)
+	var r := Rect2(0, 0, wpx, hpx)
+	border_node.draw_rect(r.grow(w * 1.5), Color(BORDER.r, BORDER.g, BORDER.b, 0.18), false, w * 3.0)
+	border_node.draw_rect(r.grow(w * 0.5), BORDER, false, w)
+
+
 func _draw_overlay() -> void:
 	var w := 3.0 / zoom
 	var dir := Vector2.from_angle(deg_to_rad(aim_angle))
@@ -1700,8 +1816,8 @@ func _hold_tick(delta: float) -> void:
 	if press_t >= HOLD_TIME:
 		press_pending = false
 		_sling_begin(press_pos)
-		if OS.has_feature("mobile"):
-			Input.vibrate_handheld(15)
+		GameData.vibrate(15)
+		Sfx.play("aim", 0.0)
 
 
 func _sling_begin(p: Vector2) -> void:
@@ -1828,6 +1944,7 @@ func _fire(from = null) -> void:
 	counts[t] += 1
 	last_launch = lp
 	_spawn_ball(t, aim_angle, lp)
+	Sfx.play("launch")
 	_refresh_ui()
 
 
@@ -1837,6 +1954,7 @@ func _buy_dmg(t: String) -> void:
 		return
 	coins -= c
 	dmg_lvl[t] += 1
+	Sfx.play("buy", 0.04)
 	_recalc_stats()
 	_refresh_ui()
 
@@ -1847,6 +1965,7 @@ func _buy_spd(t: String) -> void:
 		return
 	coins -= c
 	spd_lvl[t] += 1
+	Sfx.play("buy", 0.04)
 	_recalc_stats()
 	var sp := _speed(t)
 	for b in balls:
@@ -1896,6 +2015,7 @@ func _unlock(t: String) -> void:
 		return
 	GameData.u -= c
 	GameData.unlocked[t] = true
+	Sfx.play("gold", 0.0)
 	GameData.save_game()
 	_rebuild_rows()
 
@@ -1906,6 +2026,7 @@ func _perk_up(t: String) -> void:
 		return
 	GameData.u -= lvl + 1
 	GameData.perks[t] = lvl + 1
+	Sfx.play("buy", 0.04)
 	GameData.save_game()
 	_recalc_stats()
 	_refresh_ui()
@@ -1916,6 +2037,7 @@ func _super_up(t: String) -> void:
 		return
 	GameData.u -= GameData.SUPER_COST
 	GameData.supers[t] = true
+	Sfx.play("gold", 0.0)
 	GameData.save_game()
 	_recalc_stats()
 	_refresh_ui()
@@ -1927,6 +2049,7 @@ func _mastery_up() -> void:
 		return
 	GameData.u -= c
 	GameData.mastery += 1
+	Sfx.play("buy", 0.04)
 	GameData.save_game()
 	_recalc_stats()
 	_refresh_ui()

@@ -1048,3 +1048,102 @@ func test_mastery() -> void:
 	check(GameData.mastery == 2, "мастерство не сохранилось")
 	GameData.mastery = 1000
 	check(GameData.mastery_cost() > 0 and g._damage_of("basic") > 0, "мастерство 1000 сломало числа")
+
+
+## Раскладки картинок — узоры, а не россыпь: в кольце один мотив, левая половина зеркальная, детерминировано.
+func test_layouts() -> void:
+	var g = await new_game(3)   # «Кошачий двор», кольца
+	check(g.map["layout"] == "rings", "у «Кошачьего двора» не кольца")
+	var by_ring := {}
+	var slots := 0
+	var flips_ok := true
+	for ry in range(0, g.H / g.region_size + 1):
+		for rx in range(0, g.W / g.region_size + 1):
+			var s: Array = g._layout_slot(rx, ry)
+			if s.is_empty():
+				continue
+			slots += 1
+			var c: Vector2 = (Vector2(rx, ry) + Vector2(0.5, 0.5)) * g.region_size
+			var d: Vector2 = c - (Vector2(g.start_cell) + Vector2(0.5, 0.5))
+			var ring := int(round(d.length() / g.region_size))
+			if by_ring.has(ring) and by_ring[ring] != s[0]:
+				check(false, "в кольце %d разные мотивы: %s и %s" % [ring, by_ring[ring], s[0]])
+			by_ring[ring] = s[0]
+			if bool(s[2]) != (d.x < 0.0):
+				flips_ok = false
+			check(s == g._layout_slot(rx, ry), "раскладка недетерминирована")
+	check(slots > 10, "картинок слишком мало: %d" % slots)
+	check(flips_ok, "левая половина не зеркальная")
+	# у всех раскладок есть картинки, и бесконечные уровни получают разные узоры
+	var seen := {}
+	for i in range(7, 20):
+		seen[preload("res://scripts/maps.gd").get_map(i)["layout"]] = true
+	check(seen.size() >= 4, "у бесконечных уровней мало разных узоров: %s" % str(seen.keys()))
+
+
+## Звуки: все загружены, выключатель работает, частые звуки ограничены по частоте.
+func test_audio() -> void:
+	for s in Sfx.SOUNDS:
+		check(Sfx.players[s].stream != null, "звук %s не загрузился" % s)
+	check(Sfx.music.stream != null and Sfx.music.stream.loop, "музыка не загрузилась или не зациклена")
+	GameData.sfx_on = true
+	Sfx._last.clear()
+	var n0: int = int(Sfx.played.get("hit", 0))
+	Sfx.play("hit")
+	Sfx.play("hit")   # сразу второй — отсекается ограничителем
+	check(int(Sfx.played.get("hit", 0)) == n0 + 1, "ограничитель частоты ударов не сработал")
+	GameData.sfx_on = false
+	var b0: int = int(Sfx.played.get("buy", 0))
+	Sfx._last.clear()
+	Sfx.play("buy")
+	check(int(Sfx.played.get("buy", 0)) == b0, "звук играет при выключенных звуках")
+	GameData.sfx_on = true
+	# игровые события озвучены
+	var g = await new_game(2)
+	Sfx._last.clear()
+	var l0: int = int(Sfx.played.get("launch", 0))
+	g.coins = 1000
+	g._fire(g.start_pos)
+	check(int(Sfx.played.get("launch", 0)) == l0 + 1, "выстрел без звука")
+
+
+## Вибрация при начале прицела — только если включена; настройки звука и вибрации сохраняются.
+func test_vibration_and_settings() -> void:
+	var g = await new_game(2)
+	var c: Vector2 = get_viewport().get_visible_rect().size * 0.5
+	GameData.vibration_on = true
+	var v0: int = GameData.vibrations
+	g._press_down(c)
+	g._hold_tick(0.3)
+	g._press_cancel()
+	check(GameData.vibrations == v0 + 1, "нет вибрации при начале прицела")
+	GameData.vibration_on = false
+	g._press_down(c)
+	g._hold_tick(0.3)
+	g._press_cancel()
+	check(GameData.vibrations == v0 + 1, "вибрация при выключенной настройке")
+	GameData.music_on = false
+	GameData.sfx_on = false
+	GameData.save_game()
+	GameData.music_on = true
+	GameData.sfx_on = true
+	GameData.vibration_on = true
+	GameData.load_game()
+	check(not GameData.music_on and not GameData.sfx_on and not GameData.vibration_on, "настройки звука/вибрации не сохранились")
+	GameData.music_on = true
+	GameData.sfx_on = true
+	GameData.vibration_on = true
+	GameData.save_game()
+
+
+## Граница карты и сетка в тумане: слои есть и перерисовываются при движении камеры.
+func test_border_and_fog_grid() -> void:
+	var g = await new_game(0)
+	check(g.frame_node != null and g.border_node != null, "нет слоёв границы и сетки")
+	var draws := [0]
+	g.border_node.draw.connect(func(): draws[0] += 1)
+	g.cam.position += Vector2(80, 0)
+	g._clamp_cam()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check(draws[0] >= 1, "граница не перерисовалась при движении камеры")

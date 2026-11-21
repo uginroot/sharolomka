@@ -115,4 +115,8 @@ const T := {
 	"Мастерство": "Mastery",
 	"+10% урона всех шаров за уровень, без предела": "+10% damage for all balls per level, no limit",
 	"Уровень %d → %d · %d": "Level %d → %d · %d",
+	"Музыка": "Music",
+	"Звуки игры": "Game sounds",
+	"Вибрация": "Vibration",
+	"Короткий отклик, когда начинается прицел": "A short buzz when aiming starts",
 }

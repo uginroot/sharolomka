@@ -63,6 +63,10 @@ var map_states := {}
 var current_map := 0
 var eco_mode := false       # 30 FPS вместо 60
 var keep_screen := false    # не гасить экран во время игры
+var music_on := true        # музыка
+var sfx_on := true          # звуки игры
+var vibration_on := true    # мини-вибрация при начале прицеливания
+var vibrations := 0         # счётчик вибраций — для тестов
 var lang := "ru"            # действующий язык интерфейса
 var lang_choice := ""       # выбор игрока; пусто — как в системе (русский, если система на русском, иначе английский)
 
@@ -139,6 +143,7 @@ func save_game() -> void:
 		"u": u, "unlocked": unlocked, "perks": perks, "supers": supers,
 		"maps_unlocked": maps_unlocked, "mastery": mastery, "maps_done": maps_done, "map_states": map_states,
 		"eco_mode": eco_mode, "keep_screen": keep_screen, "lang_choice": lang_choice,
+		"music_on": music_on, "sfx_on": sfx_on, "vibration_on": vibration_on,
 	}
 	# атомарно: временный файл + переименование
 	var f := FileAccess.open(SAVE_PATH + ".tmp", FileAccess.WRITE)
@@ -172,8 +177,20 @@ func load_game() -> void:
 	map_states = _dict(data.get("map_states", {}))
 	eco_mode = bool(data.get("eco_mode", false))
 	keep_screen = bool(data.get("keep_screen", false))
+	music_on = bool(data.get("music_on", true))
+	sfx_on = bool(data.get("sfx_on", true))
+	vibration_on = bool(data.get("vibration_on", true))
 	# старый ключ "lang" записывался автоматически — не считаем его выбором игрока
 	lang_choice = String(data.get("lang_choice", ""))
+
+
+## Мини-вибрация (если включена в настройках). На Android нужно разрешение VIBRATE в экспорт-пресете.
+func vibrate(ms: int) -> void:
+	if not vibration_on:
+		return
+	vibrations += 1
+	if OS.has_feature("mobile"):
+		Input.vibrate_handheld(ms)
 
 
 ## «Мастерство»: бесконечная трата U, когда перки и суперы куплены.
@@ -203,6 +220,9 @@ static func _dict(v) -> Dictionary:
 func reset_all() -> void:
 	var e := eco_mode
 	var k := keep_screen
+	var mu := music_on
+	var sx := sfx_on
+	var vb := vibration_on
 	var l := lang_choice
 	_reset_defaults()
 	var dir := DirAccess.open("user://")
@@ -212,6 +232,9 @@ func reset_all() -> void:
 				dir.remove(f)
 	eco_mode = e
 	keep_screen = k
+	music_on = mu
+	sfx_on = sx
+	vibration_on = vb
 	lang_choice = l
 	save_game()
 

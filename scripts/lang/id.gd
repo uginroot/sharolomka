@@ -115,4 +115,8 @@ const T := {
 	"Мастерство": "Penguasaan",
 	"+10% урона всех шаров за уровень, без предела": "+10% kerusakan semua bola per level, tanpa batas",
 	"Уровень %d → %d · %d": "Level %d → %d · %d",
+	"Музыка": "Musik",
+	"Звуки игры": "Suara game",
+	"Вибрация": "Getar",
+	"Короткий отклик, когда начинается прицел": "Getaran singkat saat mulai membidik",
 }
