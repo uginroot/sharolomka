@@ -67,6 +67,7 @@ const EN := {
 	"В меню": "To menu",
 	"Отпустите — выстрел": "Release to shoot",
 	"Отпустите — отмена": "Release to cancel",
+	"Нажмите на открытую клетку": "Press on an open cell",
 	# --- шары
 	"Обычный": "Basic",
 	"Бомба": "Bomb",

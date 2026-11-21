@@ -136,6 +136,8 @@ func _run() -> void:
 	_touch(p + Vector2(0, 150), false)
 	await get_tree().process_frame
 	check(g.balls.size() == n_before + 1, "рогатка: оттянуть и отпустить — выстрел")
+	var pw: Vector2 = g._screen_to_world(p)
+	check(g.balls[-1].pos.distance_to(g._launch_from(pw)) < 40.0, "рогатка: шар вылетел из точки нажатия")
 	check(absf(g.aim_angle + 90.0) < 1.0, "рогатка: оттянули вниз — летит вверх")
 	# отмена: вытянуть за область наведения
 	_touch(p, true)
@@ -160,20 +162,20 @@ func _run() -> void:
 	g.rubles = 5000
 	await _wait(0.2)
 	var n0: int = g.balls.size()
-	var lp = g._launch_point()
+	var lp: Vector2 = g.last_launch
 	check(await _tap("Выстрел"), "кнопка «Выстрел» нажимается")
 	check(g.balls.size() == n0 + 1, "выстрел добавил шар")
-	if g.balls.size() == n0 + 1 and lp != null:
-		check(g.balls[-1].pos.distance_to(lp) < 60.0, "шар вылетел из точки выстрела")
+	if g.balls.size() == n0 + 1:
+		check(g.balls[-1].pos.distance_to(lp) < 40.0, "кнопка стреляет из места последнего выстрела")
 	g._select("splash")
 	await _wait(0.2)
 	await _tap("Выстрел")
 	check(int(g.counts["splash"]) == 1, "выстрел выбранным типом (бомба)")
 
 	# сдвиг карты двумя пальцами двигает точку выстрела
-	var c0: Vector2 = g._screen_center_world()
+	var c0: Vector2 = g.cam.position
 	await _two_fingers(0.0, Vector2(0, 250))
-	check(g._screen_center_world().distance_to(c0) > 20.0, "два пальца двигают карту")
+	check(g.cam.position.distance_to(c0) > 20.0, "два пальца двигают карту")
 	await _wait(1.0)
 	await _shot("fired")
 
@@ -203,6 +205,7 @@ func _run() -> void:
 
 	# меню и «Продолжить»
 	var destroyed: int = g.destroyed
+	var ball_spots: Array = g.balls.map(func(b): return b.pos)
 	var menu_btn: Button = g.top_bar.find_children("*", "Button", true, false)[0]
 	await _tap_at(menu_btn.get_global_rect().get_center())
 	await _wait(1.0)
@@ -213,6 +216,7 @@ func _run() -> void:
 	var g2 = get_tree().current_scene
 	check(g2.name == "Game" and g2.destroyed >= destroyed, "игра продолжилась с сохранённым прогрессом")
 	check(g2.field_root.get_child_count() > 0, "открытая часть карты рисуется после загрузки")
+	check(g2.balls.size() == ball_spots.size(), "после «Продолжить» столько же шаров")
 	await _shot("continued")
 
 	# английский язык через экран настроек

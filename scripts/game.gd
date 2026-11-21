@@ -113,6 +113,9 @@ var sling_start := Vector2.ZERO # где нажали (экран)
 var sling_pos := Vector2.ZERO   # где палец сейчас (экран)
 var sling_cancel := false       # палец вытянут за область наведения
 var sling_view: Control
+var saved_balls: Array = []
+var last_launch := Vector2.ZERO  # откуда был последний выстрел — для кнопки «Выстрел» и «Сброса»
+var sling_from = null           # точка вылета для текущей рогатки (мир) или null — нажали не туда
 
 # ---- интерфейс
 var ui_root: Control
@@ -173,6 +176,7 @@ func _ready() -> void:
 	@warning_ignore("integer_division")
 	start_cell = Vector2i(W / 2, H / 2)   # прохождение начинается из центра карты
 	start_pos = (Vector2(start_cell) + Vector2(0.5, 0.5)) * CELL
+	last_launch = start_pos
 	hb = float(map["hp_base"])
 	hg = float(map["hp_growth"])
 	region_size = int(map.get("region", maxi(W, H)))
@@ -212,8 +216,18 @@ func _ready() -> void:
 				_reveal(x, y)
 
 	_recalc_stats()
+	# шары продолжают движение с тех мест, где были при выходе
+	var placed := {}
+	for sb in saved_balls:
+		var t: String = sb[0]
+		if not t_idx.has(t) or int(placed.get(t, 0)) >= int(counts[t]):
+			continue
+		_spawn_ball(t, 0.0, Vector2(sb[1], sb[2]))
+		var v := Vector2(sb[3], sb[4])
+		balls[-1].vel = (v.normalized() if v.length() > 0.0 else Vector2.UP) * _speed(t)
+		placed[t] = int(placed.get(t, 0)) + 1
 	for t in GameData.TYPE_ORDER:
-		for k in int(counts[t]):
+		for k in int(counts[t]) - int(placed.get(t, 0)):
 			_spawn_ball(t, aim_angle + (randf_range(-30.0, 30.0) if saved_at > 0.0 else 0.0))
 
 	cam = Camera2D.new()
@@ -565,7 +579,7 @@ func _load_state() -> float:
 	if f == null:
 		return 0.0
 	var s = f.get_var()
-	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 4 or int(s.get("w", 0)) != W:
+	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 5 or int(s.get("w", 0)) != W:
 		return 0.0
 	rubles = int(s.get("rubles", 0))
 	destroyed = int(s.get("destroyed", 0))
@@ -579,6 +593,13 @@ func _load_state() -> float:
 		spd_lvl[t] = int(sl.get(t, 0))
 	if int(counts["basic"]) == 0:
 		counts["basic"] = 1
+	saved_balls = s.get("balls", [])
+	var ll: Array = s.get("last_launch", [])
+	if ll.size() == 2:
+		last_launch = Vector2(ll[0], ll[1])
+	aim_angle = float(s.get("aim", aim_angle))
+	if GameData.unlocked.get(String(s.get("selected", "basic")), false):
+		selected = String(s.get("selected", "basic"))
 	var ch: Dictionary = s.get("chunks", {})
 	for ck in ch:
 		var cc = _gen_chunk(int(ck), ch[ck])
@@ -612,9 +633,11 @@ func _save_state() -> void:
 			c.blob_dirty = false
 		out[ck] = c.blob
 	var s := {
-		"ver": 4, "w": W, "rubles": rubles, "destroyed": destroyed, "goal_done": goal_done,
+		"ver": 5, "w": W, "rubles": rubles, "destroyed": destroyed, "goal_done": goal_done,
 		"counts": counts.duplicate(), "dmg": dmg_lvl.duplicate(), "spd": spd_lvl.duplicate(),
 		"saved_at": Time.get_unix_time_from_system(), "chunks": out,
+		"balls": balls.map(func(b): return [b.type, b.pos.x, b.pos.y, b.vel.x, b.vel.y]),
+		"last_launch": [last_launch.x, last_launch.y], "aim": aim_angle, "selected": selected,
 	}
 	var f := FileAccess.open(_save_path(), FileAccess.WRITE)
 	if f:
@@ -1281,43 +1304,39 @@ func _screen_center_world() -> Vector2:
 	return _screen_to_world(Vector2(vs.x * 0.5, (top_h + vs.y - bottom_h) * 0.5))
 
 
-## Точка выстрела: центр экрана, а если там квадрат или стена — ближайшая свободная открытая клетка.
-func _launch_point():
-	var c := _screen_center_world()
-	var cx := int(floor(c.x * INV))
-	var cy := int(floor(c.y * INV))
-	for r in range(0, 7):
-		var best = null
-		var bd := INF
-		for yy in range(cy - r, cy + r + 1):
-			for xx in range(cx - r, cx + r + 1):
-				if maxi(absi(xx - cx), absi(yy - cy)) != r:
-					continue
-				if not _vis_at(xx, yy) or _kind_at(xx, yy) != 0:
-					continue
-				var p := (Vector2(xx, yy) + Vector2(0.5, 0.5)) * CELL
-				var d := p.distance_squared_to(c)
-				if d < bd:
-					bd = d
-					best = p
-		if best != null:
-			return best if r > 0 else c.clamp((Vector2(cx, cy) + Vector2(0.25, 0.25)) * CELL, (Vector2(cx, cy) + Vector2(0.75, 0.75)) * CELL)
-	return null
+## Точка вылета для нажатия в мировой точке w: сама точка, если клетка пустая и открытая,
+## иначе ближайшая пустая открытая клетка в радиусе 2. null — нажали не туда.
+func _launch_from(w: Vector2):
+	var cx := int(floor(w.x * INV))
+	var cy := int(floor(w.y * INV))
+	if _vis_at(cx, cy) and _kind_at(cx, cy) == 0:
+		# держим шар внутри клетки, чтобы он не появлялся «в» соседнем квадрате
+		return w.clamp((Vector2(cx, cy) + Vector2(0.25, 0.25)) * CELL, (Vector2(cx, cy) + Vector2(0.75, 0.75)) * CELL)
+	var best = null
+	var bd := INF
+	for yy in range(cy - 2, cy + 3):
+		for xx in range(cx - 2, cx + 3):
+			if not _vis_at(xx, yy) or _kind_at(xx, yy) != 0:
+				continue
+			var p := (Vector2(xx, yy) + Vector2(0.5, 0.5)) * CELL
+			var d := p.distance_squared_to(w)
+			if d < bd:
+				bd = d
+				best = p
+	return best
 
 
 func _draw_overlay() -> void:
-	var lp = _launch_point()
 	var w := 3.0 / zoom
-	if lp == null:
-		# выстрелить неоткуда — красный крестик в центре
-		var c := _screen_center_world()
-		var s := 12.0 / zoom
-		overlay.draw_line(c - Vector2(s, s), c + Vector2(s, s), Color(1, 0.35, 0.35, 0.9), w)
-		overlay.draw_line(c - Vector2(s, -s), c + Vector2(s, -s), Color(1, 0.35, 0.35, 0.9), w)
-	else:
-		var dir := Vector2.from_angle(deg_to_rad(aim_angle))
-		var pull := (sling_start - sling_pos).length()
-		if sling and pull >= SLING_MIN:
+	var dir := Vector2.from_angle(deg_to_rad(aim_angle))
+	var col: Color = colors[selected]
+	var pull := (sling_start - sling_pos).length()
+	if sling and sling_from != null:
+		var lp: Vector2 = sling_from
+		overlay.draw_arc(lp, 13.0 / zoom, 0.0, TAU, 32, Color(0, 0, 0, 0.6), 6.0 / zoom)
+		overlay.draw_arc(lp, 13.0 / zoom, 0.0, TAU, 32, col, 3.0 / zoom)
+		overlay.draw_circle(lp, 4.0 / zoom, col)
+		if pull >= SLING_MIN:
 			# стрелка направления: длина растёт с оттягиванием, при отмене — красная
 			var acol := Color(1, 0.4, 0.4, 0.9) if sling_cancel else Color(1.0, 0.85, 0.3, 0.95)
 			var alen := (90.0 + 180.0 * minf(pull, SLING_R) / SLING_R) / zoom
@@ -1327,16 +1346,15 @@ func _draw_overlay() -> void:
 			overlay.draw_line(lp, tip - dir * (18.0 / zoom), acol, 5.0 / zoom)
 			overlay.draw_colored_polygon(PackedVector2Array([tip, tip - dir * (26.0 / zoom) + side,
 				tip - dir * (26.0 / zoom) - side]), acol)
-		else:
-			var len := 170.0 / zoom
-			var k := 0.0
-			while k < len:
-				overlay.draw_line(lp + dir * k, lp + dir * minf(k + len * 0.06, len), Color(1, 1, 1, 0.75), w)
-				k += len * 0.12
-		var col: Color = colors[selected]
-		overlay.draw_arc(lp, 13.0 / zoom, 0.0, TAU, 32, Color(0, 0, 0, 0.6), 6.0 / zoom)
-		overlay.draw_arc(lp, 13.0 / zoom, 0.0, TAU, 32, col, 3.0 / zoom)
-		overlay.draw_circle(lp, 4.0 / zoom, col)
+	elif not sling:
+		# еле заметная отметка последнего выстрела — отсюда стреляет кнопка «Выстрел»
+		var faint := Color(col.r, col.g, col.b, 0.35)
+		overlay.draw_arc(last_launch, 10.0 / zoom, 0.0, TAU, 24, faint, 2.0 / zoom)
+		var len := 60.0 / zoom
+		var k := 14.0 / zoom
+		while k < len:
+			overlay.draw_line(last_launch + dir * k, last_launch + dir * minf(k + 6.0 / zoom, len), faint, 2.0 / zoom)
+			k += 12.0 / zoom
 	var font: Font = GameData.font_bold
 	var fs := int(clampf(26.0 / zoom, 26.0, 4000.0))
 	for p in popups:
@@ -1463,22 +1481,23 @@ func _sling_begin(p: Vector2) -> void:
 	sling_pos = p
 	sling_cancel = false
 	aim_before = aim_angle
+	sling_from = _launch_from(_screen_to_world(p))
 
 
 func _sling_move(p: Vector2) -> void:
 	sling_pos = p
 	var pull := sling_start - p
-	sling_cancel = pull.length() > SLING_R
+	sling_cancel = pull.length() > SLING_R or sling_from == null
 	if pull.length() >= SLING_MIN and not sling_cancel:
 		aim_angle = _snap(rad_to_deg(pull.angle()))
 
 
 func _sling_release() -> void:
 	var pull := sling_start - sling_pos
-	var ok := not sling_cancel and pull.length() >= SLING_MIN
+	var ok := not sling_cancel and sling_from != null and pull.length() >= SLING_MIN
 	sling = false
 	if ok:
-		_fire()
+		_fire(sling_from)
 	else:
 		aim_angle = aim_before
 
@@ -1493,17 +1512,19 @@ func _draw_sling() -> void:
 	if not sling:
 		return
 	var pull := sling_start - sling_pos
-	var col := Color(1, 0.4, 0.4, 0.9) if sling_cancel else Color(1, 1, 1, 0.85)
+	var col := Color(1, 0.4, 0.4, 0.9) if sling_cancel or sling_from == null else Color(1, 1, 1, 0.85)
 	# область наведения вокруг точки нажатия
 	sling_view.draw_circle(sling_start, SLING_R, Color(col.r, col.g, col.b, 0.06))
 	sling_view.draw_arc(sling_start, SLING_R, 0.0, TAU, 64, Color(col.r, col.g, col.b, 0.35), 2.0, true)
 	sling_view.draw_line(sling_start, sling_pos, Color(col.r, col.g, col.b, 0.6), 3.0, true)
 	sling_view.draw_circle(sling_start, 6.0, col)
 	sling_view.draw_circle(sling_pos, 10.0, Color(col.r, col.g, col.b, 0.5))
-	if pull.length() < SLING_MIN:
+	if pull.length() < SLING_MIN and sling_from != null:
 		return
 	var font: Font = GameData.font_bold
 	var txt := tr("Отпустите — отмена") if sling_cancel else tr("Отпустите — выстрел")
+	if sling_from == null:
+		txt = tr("Нажмите на открытую клетку")
 	var tp := sling_start + Vector2(-150, -SLING_R - 16)
 	sling_view.draw_string(font, tp, txt, HORIZONTAL_ALIGNMENT_CENTER, 300, 20, col)
 
@@ -1548,15 +1569,16 @@ func _cycle_snap() -> void:
 
 # ================================================================ действия
 
-## Выстрел новым шаром выбранного типа из центра экрана.
-func _fire() -> void:
+## Выстрел новым шаром выбранного типа. Без точки — из места последнего выстрела (кнопка «Выстрел»).
+func _fire(from = null) -> void:
 	var t := selected
 	var c := _ball_cost(t)
-	var lp = _launch_point()
-	if rubles < c or lp == null:
+	var lp: Vector2 = last_launch if from == null else from
+	if rubles < c:
 		return
 	rubles -= c
 	counts[t] += 1
+	last_launch = lp
 	_spawn_ball(t, aim_angle, lp)
 	_refresh_ui()
 
@@ -1585,7 +1607,7 @@ func _buy_spd(t: String) -> void:
 	_refresh_ui()
 
 
-## Раз в 30 с: шарик выбранного типа, заработавший меньше всех, возвращается в точку выстрела по прицелу.
+## Раз в 30 с: шарик выбранного типа, заработавший меньше всех, возвращается в место последнего выстрела по прицелу.
 func _reset_stuck() -> void:
 	var t := selected
 	if reset_cd[t] > 0.0:
@@ -1594,10 +1616,9 @@ func _reset_stuck() -> void:
 	for b in balls:
 		if b.type == t and (worst == null or b.earned < worst.earned):
 			worst = b
-	var lp = _launch_point()
-	if worst == null or lp == null:
+	if worst == null:
 		return
-	worst.pos = lp
+	worst.pos = last_launch
 	worst.vel = Vector2.from_angle(deg_to_rad(aim_angle)) * _speed(t)
 	for b in balls:
 		if b.type == t:
@@ -2071,7 +2092,7 @@ func _refresh_ui() -> void:
 	btn_reset.disabled = cd > 0.0 or int(counts[selected]) == 0
 	var fc := _ball_cost(selected)
 	btn_fire.text = tr("Выстрел · %s") % GameData.fmt(fc)
-	btn_fire.disabled = rubles < fc or _launch_point() == null
+	btn_fire.disabled = rubles < fc
 
 	if not upg.visible:
 		return

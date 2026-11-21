@@ -124,7 +124,7 @@ func test_maps_generate() -> void:
 		var s: Vector2i = g.start_cell
 		check(s == Vector2i(g.W / 2, g.H / 2), "%s: старт не в центре" % maps[i]["id"])
 		check(g._kind_at(s.x, s.y) == 0 and g._vis_at(s.x, s.y), "%s: стартовая клетка не пустая/не видна" % maps[i]["id"])
-		check(g._launch_point() != null, "%s: нет точки выстрела" % maps[i]["id"])
+		check(g._launch_from(g.start_pos) != null, "%s: со старта нельзя выстрелить" % maps[i]["id"])
 		check(g.balls.size() == 1, "%s: на новой карте должен быть 1 бесплатный шар" % maps[i]["id"])
 
 
@@ -240,37 +240,41 @@ func test_economy_and_counters() -> void:
 	check(g.total - g.destroyed == g.alive, "total-destroyed ≠ alive")
 
 
-## Выстрел: списывает цену, цена растёт, шар появляется в точке выстрела.
+## Выстрел: списывает цену, цена растёт, шар появляется в точке; кнопка стреляет из места последнего выстрела.
 func test_fire() -> void:
 	var g = await new_game(0)
 	g.rubles = 1000
 	var c0: int = g._ball_cost("basic")
-	var lp = g._launch_point()
-	g._fire()
+	var p: Vector2 = g.start_pos + Vector2(10, 5)
+	g._fire(p)
 	check(g.rubles == 1000 - c0, "выстрел списал не ту сумму")
 	check(g.balls.size() == 2, "после выстрела должно быть 2 шара")
-	check(g.balls[1].pos.distance_to(lp) < 0.01, "шар появился не в точке выстрела")
+	check(g.balls[1].pos.distance_to(p) < 0.01, "шар появился не в точке выстрела")
 	check(g._ball_cost("basic") > c0, "цена следующего шара не выросла")
+	g._fire()
+	check(g.balls[2].pos.distance_to(p) < 0.01, "кнопка «Выстрел» стреляет не из места последнего выстрела")
 	g.rubles = 0
 	g._fire()
-	check(g.balls.size() == 2, "выстрел без денег сработал")
+	check(g.balls.size() == 3, "выстрел без денег сработал")
 
 
-## Точка выстрела всегда в пустой видимой клетке, даже если центр экрана над квадратом.
-func test_launch_point_snaps() -> void:
+## Точка вылета: пустая открытая клетка — прямо там; квадрат рядом с пустотой — ближайшая пустая; туман вдали — нельзя.
+func test_launch_from_press() -> void:
 	var g = await new_game(2)
-	g.cam.position = g.start_pos + Vector2(0, -40.0 * 4)
-	var lp = g._launch_point()
-	check(lp != null, "нет точки выстрела рядом со стартом")
-	if lp != null:
-		var c := cell_of(lp)
-		check(g._kind_at(c.x, c.y) == 0 and g._vis_at(c.x, c.y), "точка выстрела не в пустой видимой клетке")
-	g.cam.position = Vector2(40.0 * 3, 40.0 * 3)
-	g._clamp_cam()
-	var lp2 = g._launch_point()
-	if lp2 != null:
-		var c2 := cell_of(lp2)
-		check(g._kind_at(c2.x, c2.y) == 0, "точка выстрела в непустой клетке")
+	var s: Vector2 = g.start_pos
+	var a = g._launch_from(s + Vector2(3, -4))
+	check(a != null and a.distance_to(s + Vector2(3, -4)) < 0.01, "в пустой клетке шар не вылетает из точки нажатия")
+	var brick := Vector2.ZERO
+	for y in range(g.ey0, g.ey1 + 1):
+		for x in range(g.ex0, g.ex1 + 1):
+			if g._vis_at(x, y) and g._kind_at(x, y) == 1:
+				brick = (Vector2(x, y) + Vector2(0.5, 0.5)) * 40.0
+	var b = g._launch_from(brick)
+	check(b != null, "нажатие на видимый квадрат у пустоты не нашло точку вылета")
+	if b != null:
+		var c := cell_of(b)
+		check(g._kind_at(c.x, c.y) == 0 and g._vis_at(c.x, c.y), "точка вылета не в пустой открытой клетке")
+	check(g._launch_from(s + Vector2(40.0 * 30, 0)) == null, "нажатие в далёкий туман разрешило выстрел")
 
 
 ## Центр поля доходит до края открытой части без увеличения.
@@ -299,6 +303,8 @@ func test_save_load_roundtrip() -> void:
 	var destroyed: int = g.destroyed
 	var rubles: int = g.rubles
 	var counts: Dictionary = g.counts.duplicate()
+	var bpos: Array = g.balls.map(func(b): return [b.type, b.pos, b.vel.normalized()])
+	var last: Vector2 = g.last_launch
 	var snap := {}
 	for ck in g.chunks.size():
 		var c = g.chunks[ck]
@@ -308,12 +314,19 @@ func test_save_load_roundtrip() -> void:
 	game = null
 	await get_tree().process_frame
 	game = GAME.instantiate()
-	add_child(game)
-	await get_tree().process_frame
+	add_child(game)   # _ready отрабатывает сразу; проверяем до первого кадра, пока шары не сдвинулись
 	var g2 = game
 	check(g2.destroyed == destroyed, "destroyed %d → %d" % [destroyed, g2.destroyed])
 	check(g2.rubles == rubles, "рубли %d → %d" % [rubles, g2.rubles])
 	check(g2.counts == counts, "число шаров не совпало")
+	check(g2.balls.size() == bpos.size(), "после загрузки другое число шаров")
+	var moved := 0
+	for i in mini(bpos.size(), g2.balls.size()):
+		var b = g2.balls[i]
+		if b.type != bpos[i][0] or b.pos.distance_to(bpos[i][1]) > 0.01 or b.vel.normalized().distance_to(bpos[i][2]) > 0.001:
+			moved += 1
+	check(moved == 0, "после «Продолжить» шаров не на своих местах: %d" % moved)
+	check(g2.last_launch.distance_to(last) < 0.01, "не восстановилось место последнего выстрела")
 	var bad := 0
 	for ck in snap:
 		var c = g2.chunks[ck]
@@ -346,8 +359,8 @@ func test_reset_cooldown() -> void:
 	var g = await new_game(2)
 	sim(g, 3.0)
 	g._reset_stuck()
-	var lp = g._launch_point()
-	check(g.balls[0].pos.distance_to(lp) < 0.01, "шар не вернулся в точку выстрела")
+	var lp: Vector2 = g.last_launch
+	check(g.balls[0].pos.distance_to(lp) < 0.01, "шар не вернулся в место последнего выстрела")
 	check(g.reset_cd["basic"] > 29.0, "кулдаун сброса не запущен")
 	var p: Vector2 = g.balls[0].pos
 	sim(g, 1.0)
@@ -467,13 +480,17 @@ func test_english_ui() -> void:
 func test_slingshot() -> void:
 	var g = await new_game(2)
 	g.rubles = 100000
-	var c := Vector2(360, 700)
+	g.cam.position = g.start_pos
+	g._clamp_cam()
+	var c: Vector2 = (g.start_pos - g.cam.position) * g.zoom + get_viewport().get_visible_rect().size * 0.5   # экранная точка старта
 	var n0: int = g.balls.size()
 	g._sling_begin(c)
 	g._sling_move(c + Vector2(0, 120))      # тянем вниз
 	check(absf(g.aim_angle - (-90.0)) < 0.5, "оттянули вниз — направление вверх, а не %.1f" % g.aim_angle)
+	var from = g.sling_from
 	g._sling_release()
 	check(g.balls.size() == n0 + 1, "отпускание после оттягивания стреляет")
+	check(from != null and g.balls[-1].pos.distance_to(g._launch_from(g._screen_to_world(c))) < 0.01, "шар вылетел не из точки нажатия")
 	var a: float = g.aim_angle
 	g._sling_begin(c)
 	g._sling_move(c + Vector2(100, 0))
@@ -491,3 +508,9 @@ func test_slingshot() -> void:
 	g._sling_move(c + Vector2(-100, 30))
 	check(is_equal_approx(fposmod(g.aim_angle, 90.0), 0.0), "режим 90° округляет направление")
 	g._sling_abort()
+	# нажатие в туман — выстрела нет
+	var far: Vector2 = c + Vector2(0, -40.0 * 30 * g.zoom)
+	g._sling_begin(far)
+	g._sling_move(far + Vector2(0, 100))
+	g._sling_release()
+	check(g.balls.size() == n0 + 1, "рогатка из тумана выстрелила")
