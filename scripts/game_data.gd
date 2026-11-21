@@ -427,7 +427,7 @@ func _btn_styles(th: Theme, type: String, base: Color, border: Color) -> void:
 	th.set_color("font_hover_pressed_color", type, Color.WHITE)
 	th.set_color("font_disabled_color", type, Color(1, 1, 1, 0.35))
 	th.set_constant("h_separation", type, 8)
-	th.set_constant("icon_max_width", type, 28)
+	th.set_constant("icon_max_width", type, 34)
 
 
 func make_theme() -> Theme:
@@ -446,7 +446,7 @@ func make_theme() -> Theme:
 
 	var th := Theme.new()
 	th.default_font = font
-	th.default_font_size = 22
+	th.default_font_size = 26
 	th.set_color("font_color", "Label", C_TEXT)
 
 	_btn_styles(th, "Button", C_BTN, Color(1, 1, 1, 0.08))
@@ -479,10 +479,10 @@ func make_theme() -> Theme:
 	# подписи
 	th.set_type_variation("Muted", "Label")
 	th.set_color("font_color", "Muted", C_MUTED)
-	th.set_font_size("font_size", "Muted", 17)
+	th.set_font_size("font_size", "Muted", 21)
 	th.set_type_variation("Title", "Label")
 	th.set_font("font", "Title", font_bold)
-	th.set_font_size("font_size", "Title", 24)
+	th.set_font_size("font_size", "Title", 29)
 	# вкладки
 	th.set_stylebox("panel", "TabContainer", StyleBoxEmpty.new())
 	th.set_stylebox("tab_selected", "TabContainer", _sb(C_ACCENT, 12))

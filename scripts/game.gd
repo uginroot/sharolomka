@@ -2157,7 +2157,7 @@ func _pill(tex: Texture2D, color: Color) -> Label:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 6)
 	p.add_child(h)
-	h.add_child(_icon_rect(tex, 26))
+	h.add_child(_icon_rect(tex, 30))
 	var l := Label.new()
 	l.add_theme_font_override("font", GameData.font_bold)
 	l.add_theme_color_override("font_color", color)
@@ -2276,7 +2276,7 @@ func _build_ui() -> void:
 	frenzy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	frenzy_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	frenzy_label.add_theme_font_override("font", GameData.font_bold)
-	frenzy_label.add_theme_font_size_override("font_size", 17)
+	frenzy_label.add_theme_font_size_override("font_size", 21)
 	frenzy_label.add_theme_color_override("font_color", Color(0.12, 0.08, 0.0))
 	frenzy_bar.add_child(frenzy_label)
 
@@ -2295,6 +2295,12 @@ func _build_ui() -> void:
 	# --- окно прокачки: полупрозрачное, игра под ним идёт
 	upg = Control.new()
 	upg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# в окне прокачки места много — шрифт крупнее, чем в остальном интерфейсе
+	var big: Theme = GameData.make_theme().duplicate()
+	big.default_font_size = 28
+	big.set_font_size("font_size", "Muted", 23)
+	big.set_font_size("font_size", "Title", 32)
+	upg.theme = big
 	upg.visible = false
 	ui_root.add_child(upg)
 	var dim := ColorRect.new()
@@ -2383,7 +2389,7 @@ func _on_bars_resized() -> void:
 		frenzy_bar.offset_left = m[0]
 		frenzy_bar.offset_right = -m[2]
 		frenzy_bar.offset_top = top_h + 6.0
-		frenzy_bar.offset_bottom = top_h + 36.0
+		frenzy_bar.offset_bottom = top_h + 42.0
 	_update_zoom_limits()
 	if not cam_ready and top_h > 0.0 and bottom_h > 0.0:
 		cam_ready = true
@@ -2417,7 +2423,7 @@ func _price_btn(parent: HBoxContainer, caption: String, icon: Texture2D, cb: Cal
 	var l := _label(caption, "Muted")
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(l)
-	var b := _button("", "", 54, icon)
+	var b := _button("", "", 62, icon)
 	b.pressed.connect(cb)
 	v.add_child(b)
 	return {"label": l, "button": b}
@@ -2455,7 +2461,7 @@ func _rebuild_rows() -> void:
 
 		# --- фишка выбора шара: значок и число шаров сверху, цена снизу (влезают все 5 типов)
 		if unlocked:
-			var chip := _button("", "ChipButton", 62)
+			var chip := _button("", "ChipButton", 72)
 			chip.toggle_mode = true
 			chip.button_group = chip_group
 			chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2474,16 +2480,16 @@ func _rebuild_rows() -> void:
 			top.add_theme_constant_override("separation", 4)
 			top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			cv.add_child(top)
-			var ic := _icon_rect(Icons.dot(def["color"], 44), 20)
+			var ic := _icon_rect(Icons.dot(def["color"], 44), 24)
 			ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			top.add_child(ic)
 			var cnt := Label.new()
 			cnt.add_theme_font_override("font", GameData.font_bold)
-			cnt.add_theme_font_size_override("font_size", 19)
+			cnt.add_theme_font_size_override("font_size", 23)
 			cnt.text_direction = Control.TEXT_DIRECTION_LTR
 			top.add_child(cnt)
 			var price := Label.new()
-			price.add_theme_font_size_override("font_size", 15)
+			price.add_theme_font_size_override("font_size", 18)
 			price.add_theme_color_override("font_color", GameData.C_GOLD)
 			price.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			price.text_direction = Control.TEXT_DIRECTION_LTR
@@ -2536,8 +2542,8 @@ func _rebuild_rows() -> void:
 			continue
 		var nodes := []
 		for k in 8:
-			var nb := _button("", "", 46)
-			nb.add_theme_font_size_override("font_size", 16)
+			var nb := _button("", "", 62)
+			nb.add_theme_font_size_override("font_size", 23)
 			nb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			nb.pressed.connect(_tree_buy.bind(t, k))
 			nodes.append(nb)
@@ -2545,7 +2551,7 @@ func _rebuild_rows() -> void:
 		r0.alignment = BoxContainer.ALIGNMENT_CENTER
 		pv.add_child(r0)
 		nodes[0].size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		nodes[0].custom_minimum_size.x = 260
+		nodes[0].custom_minimum_size.x = 320
 		r0.add_child(nodes[0])
 		for k in 3:
 			var rr := HBoxContainer.new()
@@ -2557,7 +2563,7 @@ func _rebuild_rows() -> void:
 		r4.alignment = BoxContainer.ALIGNMENT_CENTER
 		pv.add_child(r4)
 		nodes[7].size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		nodes[7].custom_minimum_size.x = 300
+		nodes[7].custom_minimum_size.x = 380
 		r4.add_child(nodes[7])
 		perk_refs[t] = nodes
 	_refresh_ui()

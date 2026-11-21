@@ -534,6 +534,25 @@ func test_bottom_bar_fits() -> void:
 		var r: Rect2 = g.chips[t].get_global_rect()
 		check(r.end.x <= vw + 0.5, "фишка %s за краем экрана" % t)
 	check(g.chips["basic"].get_meta("price").text != "", "на фишке нет цены")
+	check(g.top_bar.size.x <= vw + 0.5, "верхняя панель %.0f px шире экрана" % g.top_bar.size.x)
+	# окно прокачки: карточки и узлы дерева не шире экрана (крупный шрифт, длинные слова)
+	for code in ["ru", "de", "vi"]:
+		GameData.lang_choice = code
+		GameData.apply_settings()
+		g._rebuild_rows()
+		g._show_upgrades(true)
+		for k in 3:
+			await get_tree().process_frame
+		for t in g.perk_refs:
+			for nb in g.perk_refs[t]:
+				check(nb.get_global_rect().end.x <= vw + 0.5, "%s: узел дерева %s за краем экрана: %s" % [code, t, nb.text])
+		for t in g.shop_refs:
+			for key in ["dmg", "spd"]:
+				var lb: Label = g.shop_refs[t][key]["label"]
+				check(lb.get_global_rect().end.x <= vw + 0.5, "%s: подпись «%s» за краем экрана" % [code, lb.text])
+		g._show_upgrades(false)
+	GameData.lang_choice = "ru"
+	GameData.apply_settings()
 
 
 ## На любом языке, кроме русского, в интерфейсе игры и меню нет русских букв.
@@ -1305,3 +1324,20 @@ func test_sling_money_arrives() -> void:
 	check(not g._sling_blocked(), "деньги появились, а стрелка осталась красной до движения пальца")
 	g._sling_release()
 	check(g.balls.size() == n0 + 1, "после появления денег отпускание не выстрелило")
+
+
+
+## Настройки: названия языков не обрезаются (крупный шрифт).
+func test_settings_lang_buttons_fit() -> void:
+	var menu = load("res://scenes/main_menu.tscn").instantiate()
+	add_child(menu)
+	await get_tree().process_frame
+	menu._show_settings(true)
+	for k in 3:
+		await get_tree().process_frame
+	var font: Font = GameData.font
+	for b in menu.settings_box.find_children("*", "Button", true, false):
+		if b.text in GameData.LANG_NAMES.values() or b.text == tr("Как в системе"):
+			var need: float = font.get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x + 20.0
+			check(b.size.x >= need, "кнопка языка «%s» уже текста (%.0f < %.0f)" % [b.text, b.size.x, need])
+	menu.queue_free()

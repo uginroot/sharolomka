@@ -63,7 +63,7 @@ func _ready() -> void:
 	ur.add_child(pill)
 	lbl_u = Label.new()
 	lbl_u.add_theme_font_override("font", GameData.font_bold)
-	lbl_u.add_theme_font_size_override("font_size", 24)
+	lbl_u.add_theme_font_size_override("font_size", 28)
 	lbl_u.add_theme_color_override("font_color", GameData.C_GOLD)
 	pill.add_child(lbl_u)
 
@@ -84,7 +84,7 @@ func _ready() -> void:
 	ver.text = "v" + str(ProjectSettings.get_setting("application/config/version", "dev"))
 	ver.theme_type_variation = "Muted"
 	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ver.add_theme_font_size_override("font_size", 14)
+	ver.add_theme_font_size_override("font_size", 17)
 	ver.name = "Version"
 	var brow := HBoxContainer.new()
 	brow.add_theme_constant_override("separation", 10)
@@ -142,7 +142,7 @@ func _ready() -> void:
 	legacy_root.move_child(lp, 1)
 	legacy_stars = Label.new()
 	legacy_stars.add_theme_font_override("font", GameData.font_bold)
-	legacy_stars.add_theme_font_size_override("font_size", 24)
+	legacy_stars.add_theme_font_size_override("font_size", 28)
 	legacy_stars.add_theme_color_override("font_color", GameData.C_GOLD)
 	lp.add_child(legacy_stars)
 	legacy_box = _screen_list(legacy_root)
@@ -179,7 +179,7 @@ func _screen_root(title_text: String) -> VBoxContainer:
 	t.text = title_text
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	t.add_theme_font_override("font", GameData.font_bold)
-	t.add_theme_font_size_override("font_size", 40)
+	t.add_theme_font_size_override("font_size", 44)
 	root.add_child(t)
 	var back := Button.new()
 	back.text = tr("Назад")
@@ -402,7 +402,7 @@ func _fill_settings() -> void:
 	title.text = tr("Настройки")
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_override("font", GameData.font_bold)
-	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_font_size_override("font_size", 44)
 	settings_box.add_child(title)
 
 	# переключатели — сверху, сетка языков — ниже (на телефоне строки не должны уходить под край)
@@ -413,7 +413,7 @@ func _fill_settings() -> void:
 	_setting_row(tr("Не гасить экран"), tr("Пока открыта игра"), _toggle(GameData.keep_screen, _toggle_screen))
 	# язык: «Как в системе» + кнопки с названиями языков на них самих
 	var langs := GridContainer.new()
-	langs.columns = 3
+	langs.columns = 2   # крупный шрифт: в три колонки длинные названия обрезались
 	langs.add_theme_constant_override("h_separation", 8)
 	langs.add_theme_constant_override("v_separation", 8)
 	for l in [""] + GameData.LANGS:
@@ -544,7 +544,7 @@ func _fill() -> void:
 		num.custom_minimum_size.x = 48
 		num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		num.add_theme_font_override("font", GameData.font_bold)
-		num.add_theme_font_size_override("font_size", 28)
+		num.add_theme_font_size_override("font_size", 32)
 		num.add_theme_color_override("font_color", GameData.C_ACCENT.lightened(0.3))
 		h.add_child(num)
 		var tv := VBoxContainer.new()
