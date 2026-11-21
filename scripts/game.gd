@@ -71,9 +71,6 @@ var spd_lvl := {}
 var reset_cd := {}
 
 # ---- время
-var catchup := 0.0
-var warping := false
-var paused_at := 0.0
 var time_acc := 0.0
 var save_t := 0.0
 var ui_t := 0.0
@@ -119,7 +116,6 @@ var lbl_rub: Label
 var lbl_u: Label
 var lbl_prog: Label
 var btn_snap: Button
-var warp_label: Label
 var chips_box: HBoxContainer
 var chip_group := ButtonGroup.new()
 var chips := {}
@@ -166,7 +162,8 @@ func _ready() -> void:
 	hpx = H * CELL
 	chunks.resize(cw * chh)
 	seed_i = hash(String(map["id"]))
-	start_cell = map["start"]
+	@warning_ignore("integer_division")
+	start_cell = Vector2i(W / 2, H / 2)   # прохождение начинается из центра карты
 	start_pos = (Vector2(start_cell) + Vector2(0.5, 0.5)) * CELL
 	hb = float(map["hp_base"])
 	hg = float(map["hp_growth"])
@@ -217,8 +214,6 @@ func _ready() -> void:
 	_build_ui()
 	get_viewport().size_changed.connect(_layout)
 	_layout()
-	if saved_at > 0.0:
-		_start_catchup(Time.get_unix_time_from_system() - saved_at)
 
 
 # ================================================================ генерация мира
@@ -551,7 +546,7 @@ func _load_state() -> float:
 	if f == null:
 		return 0.0
 	var s = f.get_var()
-	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 3 or int(s.get("w", 0)) != W:
+	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 4 or int(s.get("w", 0)) != W:
 		return 0.0
 	rubles = int(s.get("rubles", 0))
 	destroyed = int(s.get("destroyed", 0))
@@ -598,7 +593,7 @@ func _save_state() -> void:
 			c.blob_dirty = false
 		out[ck] = c.blob
 	var s := {
-		"ver": 3, "w": W, "rubles": rubles, "destroyed": destroyed, "goal_done": goal_done,
+		"ver": 4, "w": W, "rubles": rubles, "destroyed": destroyed, "goal_done": goal_done,
 		"counts": counts.duplicate(), "dmg": dmg_lvl.duplicate(), "spd": spd_lvl.duplicate(),
 		"saved_at": Time.get_unix_time_from_system(), "chunks": out,
 	}
@@ -612,27 +607,13 @@ func _save_state() -> void:
 
 func _notification(what: int) -> void:
 	match what:
-		NOTIFICATION_APPLICATION_PAUSED:
-			paused_at = Time.get_unix_time_from_system()
-			_save_state()
-		NOTIFICATION_APPLICATION_RESUMED:
-			if paused_at > 0.0:
-				_start_catchup(Time.get_unix_time_from_system() - paused_at)
-				paused_at = 0.0
-		NOTIFICATION_WM_CLOSE_REQUEST, NOTIFICATION_APPLICATION_FOCUS_OUT:
+		NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_WM_CLOSE_REQUEST, NOTIFICATION_APPLICATION_FOCUS_OUT:
 			_save_state()
 		NOTIFICATION_WM_GO_BACK_REQUEST:
 			if upg != null and upg.visible:
 				_show_upgrades(false)
 			else:
 				_to_menu()
-
-
-## Пропущенное время проигрывается настоящей физикой в ускоренной перемотке.
-func _start_catchup(sec: float) -> void:
-	if sec < 2.0 or completed:
-		return
-	catchup = minf(catchup + sec, MAX_OFFLINE)
 
 
 # ================================================================ характеристики
@@ -677,12 +658,12 @@ func _spd_cost(t: String) -> int:
 
 # ================================================================ симуляция
 
-func _spawn_ball(t: String, ang: float) -> void:
+func _spawn_ball(t: String, ang: float, at = null) -> void:
 	var b = BallScript.new()
 	b.type = t
 	b.ti = t_idx[t]
 	b.radius = float(GameData.TYPES[t]["radius"])
-	b.pos = start_pos
+	b.pos = start_pos if at == null else at
 	b.vel = Vector2.from_angle(deg_to_rad(ang)) * _speed(t)
 	balls.append(b)
 
@@ -702,19 +683,6 @@ func _process(delta: float) -> void:
 	delta = minf(delta, 0.05)
 	_sim(delta)
 
-	# перемотка пропущенного времени — в пределах бюджета на кадр
-	if catchup > 0.0:
-		warping = true
-		var t0 := Time.get_ticks_usec()
-		while catchup > 0.0 and Time.get_ticks_usec() - t0 < WARP_BUDGET_US:
-			var s := minf(1.0 / 30.0, catchup)
-			_sim(s)
-			catchup -= s
-		if catchup <= 0.0:
-			catchup = 0.0
-			warping = false
-			GameData.save_game()
-
 	if not popups.is_empty():
 		for p in popups:
 			p["t"] -= delta
@@ -723,9 +691,7 @@ func _process(delta: float) -> void:
 		overlay_dirty = true
 
 	_redraw_dirty()
-	if overlay_dirty:
-		overlay_dirty = false
-		overlay.queue_redraw()
+	overlay.queue_redraw()   # прицел привязан к центру экрана — он дешёвый, рисуем каждый кадр
 	ball_layer.queue_redraw()
 
 	if toast_t > 0.0:
@@ -740,10 +706,10 @@ func _process(delta: float) -> void:
 		_clamp_cam()
 	ui_t -= delta
 	if ui_t <= 0.0:
-		ui_t = 0.25
+		ui_t = 0.1
 		_refresh_ui()
 	save_t += delta
-	if save_t > 20.0 and not warping:
+	if save_t > 20.0:
 		save_t = 0.0
 		_save_state()
 	_check_goal()
@@ -1035,7 +1001,7 @@ func _on_destroyed(x: int, y: int, id: int) -> void:
 	var rate := 250 * (3 if _mask_at(x, y) == 4 else 1)
 	if _hash3(x, y, seed_i + 7) % 10000 < rate:
 		GameData.u += 1
-		if not warping:
+		if true:
 			GameData.save_game()
 			popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "+1 U", "t": 1.5})
 			overlay_dirty = true
@@ -1269,15 +1235,56 @@ func _build_chunk_tex(c) -> void:
 	c.tex_dirty = false
 
 
+## Центр игрового поля на экране (между верхней и нижней панелями) в мировых координатах.
+func _screen_center_world() -> Vector2:
+	var vs := get_viewport_rect().size
+	return _screen_to_world(Vector2(vs.x * 0.5, (top_h + vs.y - bottom_h) * 0.5))
+
+
+## Точка выстрела: центр экрана, а если там квадрат или стена — ближайшая свободная открытая клетка.
+func _launch_point():
+	var c := _screen_center_world()
+	var cx := int(floor(c.x * INV))
+	var cy := int(floor(c.y * INV))
+	for r in range(0, 7):
+		var best = null
+		var bd := INF
+		for yy in range(cy - r, cy + r + 1):
+			for xx in range(cx - r, cx + r + 1):
+				if maxi(absi(xx - cx), absi(yy - cy)) != r:
+					continue
+				if not _vis_at(xx, yy) or _kind_at(xx, yy) != 0:
+					continue
+				var p := (Vector2(xx, yy) + Vector2(0.5, 0.5)) * CELL
+				var d := p.distance_squared_to(c)
+				if d < bd:
+					bd = d
+					best = p
+		if best != null:
+			return best if r > 0 else c.clamp((Vector2(cx, cy) + Vector2(0.25, 0.25)) * CELL, (Vector2(cx, cy) + Vector2(0.75, 0.75)) * CELL)
+	return null
+
+
 func _draw_overlay() -> void:
-	var dir := Vector2.from_angle(deg_to_rad(aim_angle))
-	var k := 0.0
+	var lp = _launch_point()
 	var w := 3.0 / zoom
-	var len := 170.0 / zoom
-	while k < len:
-		overlay.draw_line(start_pos + dir * k, start_pos + dir * minf(k + len * 0.06, len), Color(1, 1, 1, 0.7), w)
-		k += len * 0.12
-	overlay.draw_circle(start_pos, maxf(9.0, 6.0 / zoom), Color(1.0, 0.85, 0.2))
+	if lp == null:
+		# выстрелить неоткуда — красный крестик в центре
+		var c := _screen_center_world()
+		var s := 12.0 / zoom
+		overlay.draw_line(c - Vector2(s, s), c + Vector2(s, s), Color(1, 0.35, 0.35, 0.9), w)
+		overlay.draw_line(c - Vector2(s, -s), c + Vector2(s, -s), Color(1, 0.35, 0.35, 0.9), w)
+	else:
+		var dir := Vector2.from_angle(deg_to_rad(aim_angle))
+		var len := 170.0 / zoom
+		var k := 0.0
+		while k < len:
+			overlay.draw_line(lp + dir * k, lp + dir * minf(k + len * 0.06, len), Color(1, 1, 1, 0.75), w)
+			k += len * 0.12
+		var col: Color = colors[selected]
+		overlay.draw_arc(lp, 13.0 / zoom, 0.0, TAU, 32, Color(0, 0, 0, 0.6), 6.0 / zoom)
+		overlay.draw_arc(lp, 13.0 / zoom, 0.0, TAU, 32, col, 3.0 / zoom)
+		overlay.draw_circle(lp, 4.0 / zoom, col)
 	var font: Font = GameData.font_bold
 	var fs := int(clampf(26.0 / zoom, 26.0, 4000.0))
 	for p in popups:
@@ -1421,7 +1428,9 @@ func _pinch_update() -> void:
 
 
 func _aim_at(sp: Vector2) -> void:
-	var d := _screen_to_world(sp) - start_pos
+	var lp = _launch_point()
+	var origin: Vector2 = lp if lp != null else _screen_center_world()
+	var d := _screen_to_world(sp) - origin
 	if d.length() < 12.0:
 		return
 	aim_angle = _snap(rad_to_deg(d.angle()))
@@ -1446,13 +1455,16 @@ func _cycle_snap() -> void:
 
 # ================================================================ действия
 
-func _buy_ball(t: String) -> void:
+## Выстрел новым шаром выбранного типа из центра экрана.
+func _fire() -> void:
+	var t := selected
 	var c := _ball_cost(t)
-	if rubles < c:
+	var lp = _launch_point()
+	if rubles < c or lp == null:
 		return
 	rubles -= c
 	counts[t] += 1
-	_spawn_ball(t, aim_angle)
+	_spawn_ball(t, aim_angle, lp)
 	_refresh_ui()
 
 
@@ -1480,7 +1492,7 @@ func _buy_spd(t: String) -> void:
 	_refresh_ui()
 
 
-## Раз в 30 с: шарик выбранного типа, заработавший меньше всех, возвращается на старт по прицелу.
+## Раз в 30 с: шарик выбранного типа, заработавший меньше всех, возвращается в точку выстрела по прицелу.
 func _reset_stuck() -> void:
 	var t := selected
 	if reset_cd[t] > 0.0:
@@ -1489,9 +1501,10 @@ func _reset_stuck() -> void:
 	for b in balls:
 		if b.type == t and (worst == null or b.earned < worst.earned):
 			worst = b
-	if worst == null:
+	var lp = _launch_point()
+	if worst == null or lp == null:
 		return
-	worst.pos = start_pos
+	worst.pos = lp
 	worst.vel = Vector2.from_angle(deg_to_rad(aim_angle)) * _speed(t)
 	for b in balls:
 		if b.type == t:
@@ -1546,6 +1559,7 @@ func _to_menu() -> void:
 var ic_coin: ImageTexture
 var ic_gem: ImageTexture
 var prog_bar: ProgressBar
+var btn_fire: Button
 
 
 func _safe_margins() -> Array:
@@ -1666,12 +1680,6 @@ func _build_ui() -> void:
 	btn_snap = _button("", "", 52, Icons.angle(40))
 	btn_snap.pressed.connect(_cycle_snap)
 	tr.add_child(btn_snap)
-	warp_label = _label("")
-	warp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	warp_label.add_theme_color_override("font_color", GameData.C_GOLD)
-	warp_label.add_theme_font_size_override("font_size", 18)
-	warp_label.visible = false
-	tv.add_child(warp_label)
 	top_bar.resized.connect(_on_bars_resized)
 
 	# --- нижняя панель: выбор шара, сброс, прокачка
@@ -1692,12 +1700,18 @@ func _build_ui() -> void:
 	var br := HBoxContainer.new()
 	br.add_theme_constant_override("separation", 10)
 	bv.add_child(br)
-	btn_reset = _button("Сброс", "", 60, Icons.refresh(40))
-	btn_reset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_reset = _button("", "", 64, Icons.refresh(40))
+	btn_reset.custom_minimum_size.x = 120
 	btn_reset.pressed.connect(_reset_stuck)
 	br.add_child(btn_reset)
-	var bup := _button("Прокачка", "AccentButton", 60, Icons.arrow_up(40))
-	bup.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_fire = _button("", "AccentButton", 64, ic_coin)
+	btn_fire.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_fire.add_theme_font_size_override("font_size", 24)
+	btn_fire.pressed.connect(_fire)
+	br.add_child(btn_fire)
+	var bup := _button("", "", 64, Icons.arrow_up(40))
+	bup.custom_minimum_size.x = 150
+	bup.text = "Прокачка"
 	bup.pressed.connect(_show_upgrades.bind(true))
 	br.add_child(bup)
 	bottom_bar.resized.connect(_on_bars_resized)
@@ -1888,7 +1902,6 @@ func _rebuild_rows() -> void:
 			cv.add_child(row)
 			shop_refs[t] = {
 				"extra": extra,
-				"buy": _price_btn(row, "Новый шар", ic_coin, _buy_ball.bind(t)),
 				"dmg": _price_btn(row, "Урон", ic_coin, _buy_dmg.bind(t)),
 				"spd": _price_btn(row, "Скорость", ic_coin, _buy_spd.bind(t)),
 			}
@@ -1946,19 +1959,14 @@ func _refresh_ui() -> void:
 	else:
 		lbl_prog.text = "%s из %s" % [GameData.fmt(destroyed), GameData.fmt(goal)]
 	btn_snap.text = ["любой", "45°", "90°"][snap_mode]
-	if catchup > 0.0:
-		var sec := int(catchup)
-		@warning_ignore("integer_division")
-		warp_label.text = "Перемотка пропущенного времени · осталось %d:%02d:%02d" % [sec / 3600, (sec / 60) % 60, sec % 60]
-		warp_label.visible = true
-	elif warp_label.visible:
-		warp_label.visible = false
-
 	for t in chips:
 		chips[t].text = "×%d" % counts[t]
 	var cd: float = reset_cd[selected]
-	btn_reset.text = "Сброс" if cd <= 0.0 else "Сброс · %d с" % int(ceil(cd))
+	btn_reset.text = "Сброс" if cd <= 0.0 else "%d с" % int(ceil(cd))
 	btn_reset.disabled = cd > 0.0 or int(counts[selected]) == 0
+	var fc := _ball_cost(selected)
+	btn_fire.text = "Выстрел · %s" % GameData.fmt(fc)
+	btn_fire.disabled = rubles < fc or _launch_point() == null
 
 	if not upg.visible:
 		return
@@ -1967,9 +1975,6 @@ func _refresh_ui() -> void:
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
 		r["extra"].text = "шаров: %d · урон %d" % [counts[t], _damage_of(t)]
-		var bc := _ball_cost(t)
-		r["buy"]["button"].text = GameData.fmt(bc)
-		r["buy"]["button"].disabled = rubles < bc
 		var dc := _dmg_cost(t)
 		r["dmg"]["label"].text = "Урон → %d" % _damage_of_next(t)
 		r["dmg"]["button"].text = GameData.fmt(dc)
