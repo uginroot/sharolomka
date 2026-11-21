@@ -80,11 +80,18 @@ func _ready() -> void:
 	ts.target = sc
 	add_child(ts)
 
+	var ver := Label.new()
+	ver.text = "v" + str(ProjectSettings.get_setting("application/config/version", "dev"))
+	ver.theme_type_variation = "Muted"
+	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ver.add_theme_font_size_override("font_size", 14)
+	ver.name = "Version"
 	var bset := Button.new()
 	bset.text = tr("Настройки")
 	bset.custom_minimum_size.y = 58
 	bset.pressed.connect(_show_settings.bind(true))
 	vb.add_child(bset)
+	vb.add_child(ver)
 	main_box = vb
 
 	# --- экран настроек: прокручиваемый список + кнопки внизу
@@ -198,6 +205,12 @@ func _fill_settings() -> void:
 	title.add_theme_font_size_override("font_size", 40)
 	settings_box.add_child(title)
 
+	# переключатели — сверху, сетка языков — ниже (на телефоне строки не должны уходить под край)
+	_setting_row(tr("Музыка"), "", _toggle(GameData.music_on, _toggle_music))
+	_setting_row(tr("Звуки игры"), "", _toggle(GameData.sfx_on, _toggle_sfx))
+	_setting_row(tr("Вибрация"), tr("Короткий отклик, когда начинается прицел"), _toggle(GameData.vibration_on, _toggle_vibration))
+	_setting_row(tr("Экономия батареи"), tr("30 кадров в секунду вместо 60"), _toggle(GameData.eco_mode, _toggle_eco))
+	_setting_row(tr("Не гасить экран"), tr("Пока открыта игра"), _toggle(GameData.keep_screen, _toggle_screen))
 	# язык: «Как в системе» + кнопки с названиями языков на них самих
 	var langs := GridContainer.new()
 	langs.columns = 3
@@ -224,12 +237,6 @@ func _fill_settings() -> void:
 	lt.theme_type_variation = "Title"
 	lv.add_child(lt)
 	lv.add_child(langs)
-	_setting_row(tr("Экономия батареи"), tr("30 кадров в секунду вместо 60"), _toggle(GameData.eco_mode, _toggle_eco))
-	_setting_row(tr("Не гасить экран"), tr("Пока открыта игра"), _toggle(GameData.keep_screen, _toggle_screen))
-
-	_setting_row(tr("Музыка"), "", _toggle(GameData.music_on, _toggle_music))
-	_setting_row(tr("Звуки игры"), "", _toggle(GameData.sfx_on, _toggle_sfx))
-	_setting_row(tr("Вибрация"), tr("Короткий отклик, когда начинается прицел"), _toggle(GameData.vibration_on, _toggle_vibration))
 
 
 func _set_lang(l: String) -> void:
@@ -265,7 +272,7 @@ func _toggle_sfx() -> void:
 func _toggle_vibration() -> void:
 	GameData.vibration_on = not GameData.vibration_on
 	GameData.save_game()
-	GameData.vibrate(25)   # сразу показать, как ощущается
+	GameData.vibrate(40)   # сразу показать, как ощущается
 	_fill_settings()
 
 

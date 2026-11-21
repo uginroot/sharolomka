@@ -4,6 +4,7 @@ config_version=5
 [application]
 
 config/name="Ball Breaker"
+config/version="dev"
 config/name_localized={
 "en": "Ball Breaker",
 "ru": "Шароломка"

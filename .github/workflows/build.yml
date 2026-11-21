@@ -226,6 +226,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: sed -i "s/^version\/name=.*/version\/name=\"${GITHUB_REF_NAME#v}\"/" export_presets.cfg
 
+      - name: Version shown in the game menu
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="dev-${GITHUB_SHA::7}"; fi
+          sed -i "s/^config\/version=.*/config\/version=\"$V\"/" project.godot
+
       - name: Import project
         run: ~/godot/godot --headless --path . --import || true
 

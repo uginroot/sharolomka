@@ -1683,7 +1683,9 @@ func _update_zoom_limits() -> void:
 	var vs := get_viewport_rect().size
 	var avail := Vector2(vs.x - 16.0, vs.y - top_h - bottom_h - 16.0)
 	var er := _explored_rect()
-	zoom_min = minf(minf(avail.x / er.size.x, avail.y / er.size.y), 30.0 / CELL)
+	# отдалиться можно до всей карты целиком — видны её границы и размер (даже 10000×10000)
+	var whole := minf(avail.x / wpx, avail.y / hpx)
+	zoom_min = minf(minf(minf(avail.x / er.size.x, avail.y / er.size.y), whole), 30.0 / CELL)
 	zoom_max = 2.5
 	if zoom < zoom_min:
 		_set_zoom(zoom_min, vs * 0.5)
@@ -1816,7 +1818,7 @@ func _hold_tick(delta: float) -> void:
 	if press_t >= HOLD_TIME:
 		press_pending = false
 		_sling_begin(press_pos)
-		GameData.vibrate(15)
+		GameData.vibrate(40)   # 15 мс на многих телефонах не ощущались
 		Sfx.play("aim", 0.0)
 
 

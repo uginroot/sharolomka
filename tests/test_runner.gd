@@ -1147,3 +1147,20 @@ func test_border_and_fog_grid() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	check(draws[0] >= 1, "граница не перерисовалась при движении камеры")
+
+
+## Отдалиться можно до всей карты — граница видна даже на огромной карте; в меню виден номер версии.
+func test_whole_map_visible() -> void:
+	var g = await new_game(6)   # «Звёздная ночь», 10000×10000
+	g._update_zoom_limits()
+	var vs: Vector2 = get_viewport().get_visible_rect().size
+	g._set_zoom(0.000001, vs * 0.5)
+	var v: Rect2 = g._view_rect()
+	check(v.size.x >= g.wpx * 0.99 or v.size.y >= g.hpx * 0.99,
+		"при максимальном отдалении карта 10000×10000 не помещается: вид %s" % str(v.size))
+	var menu = load("res://scenes/main_menu.tscn").instantiate()
+	add_child(menu)
+	await get_tree().process_frame
+	var ver: Label = menu.find_child("Version", true, false)
+	check(ver != null and ver.text.begins_with("v"), "в меню нет номера версии")
+	menu.queue_free()
