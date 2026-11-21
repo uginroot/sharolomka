@@ -63,7 +63,7 @@ const T := {
 	"Отпустите — отмена": "Release to cancel",
 	"Нажмите на открытую клетку": "Press on an open cell",
 	"Отпустите — перезапуск бездельника": "Release to relaunch the idler",
-	"Не хватает рублей": "Not enough rubles",
+	"Не хватает монет": "Not enough coins",
 	"Сброс: прицельтесь": "Reset: take aim",
 	"Сброс · %d с": "Reset · %d s",
 	"Обычный": "Basic",

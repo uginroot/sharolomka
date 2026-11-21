@@ -63,7 +63,7 @@ const T := {
 	"Отпустите — отмена": "Lepaskan untuk membatalkan",
 	"Нажмите на открытую клетку": "Ketuk petak yang terbuka",
 	"Отпустите — перезапуск бездельника": "Lepaskan untuk meluncurkan ulang bola malas",
-	"Не хватает рублей": "Rubel tidak cukup",
+	"Не хватает монет": "Koin tidak cukup",
 	"Сброс: прицельтесь": "Ulang: bidik",
 	"Сброс · %d с": "Ulang · %d dtk",
 	"Обычный": "Biasa",

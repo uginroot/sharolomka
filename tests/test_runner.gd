@@ -77,7 +77,7 @@ func unlock_all(perk: int = 0, sup: bool = false) -> void:
 
 
 func fire_n(g, t: String, n: int) -> void:
-	g.rubles = 1_000_000_000
+	g.coins = 1_000_000_000
 	g.selected = t
 	for k in n:
 		g._fire()
@@ -207,7 +207,7 @@ func test_fog_invariant() -> void:
 	check(bad_far_visible == 0, "видимых клеток не у пустоты (виден не только первый слой): %d" % bad_far_visible)
 
 
-## Рубли = снятые жизни, счётчики квадратов в кусках сходятся.
+## Монеты = снятые жизни, счётчики квадратов в кусках сходятся.
 func test_economy_and_counters() -> void:
 	var g = await new_game(1, func(): unlock_all(3, false))
 	var hp0 := 0
@@ -218,14 +218,14 @@ func test_economy_and_counters() -> void:
 	fire_n(g, "basic", 10)
 	fire_n(g, "splash", 4)
 	fire_n(g, "poison", 4)
-	var r0: int = g.rubles
+	var r0: int = g.coins
 	sim(g, 30.0)
 	var hp1 := 0
 	for c in g.chunks:
 		for li in 1024:
 			if c.kind[li] == 1:
 				hp1 += c.hp[li]
-	check(g.rubles - r0 == hp0 - hp1, "рубли %d ≠ снятые жизни %d" % [g.rubles - r0, hp0 - hp1])
+	check(g.coins - r0 == hp0 - hp1, "монеты %d ≠ снятые жизни %d" % [g.coins - r0, hp0 - hp1])
 	var alive := 0
 	for ck in g.chunks.size():
 		var c = g.chunks[ck]
@@ -243,17 +243,17 @@ func test_economy_and_counters() -> void:
 ## Выстрел: списывает цену, цена растёт, шар появляется в точке; кнопка стреляет из места последнего выстрела.
 func test_fire() -> void:
 	var g = await new_game(0)
-	g.rubles = 1000
+	g.coins = 1000
 	var c0: int = g._ball_cost("basic")
 	var p: Vector2 = g.start_pos + Vector2(10, 5)
 	g._fire(p)
-	check(g.rubles == 1000 - c0, "выстрел списал не ту сумму")
+	check(g.coins == 1000 - c0, "выстрел списал не ту сумму")
 	check(g.balls.size() == 2, "после выстрела должно быть 2 шара")
 	check(g.balls[1].pos.distance_to(p) < 0.01, "шар появился не в точке выстрела")
 	check(g._ball_cost("basic") > c0, "цена следующего шара не выросла")
 	g._fire()
 	check(g.balls[2].pos.distance_to(p) < 0.01, "кнопка «Выстрел» стреляет не из места последнего выстрела")
-	g.rubles = 0
+	g.coins = 0
 	g._fire()
 	check(g.balls.size() == 3, "выстрел без денег сработал")
 
@@ -305,7 +305,7 @@ func test_save_load_roundtrip() -> void:
 	sim(g, 20.0)
 	g._save_state()
 	var destroyed: int = g.destroyed
-	var rubles: int = g.rubles
+	var coins: int = g.coins
 	var counts: Dictionary = g.counts.duplicate()
 	var bpos: Array = g.balls.map(func(b): return [b.type, b.pos, b.vel.normalized()])
 	var last: Vector2 = g.last_launch
@@ -321,7 +321,7 @@ func test_save_load_roundtrip() -> void:
 	add_child(game)   # _ready отрабатывает сразу; проверяем до первого кадра, пока шары не сдвинулись
 	var g2 = game
 	check(g2.destroyed == destroyed, "destroyed %d → %d" % [destroyed, g2.destroyed])
-	check(g2.rubles == rubles, "рубли %d → %d" % [rubles, g2.rubles])
+	check(g2.coins == coins, "монеты %d → %d" % [coins, g2.coins])
 	check(g2.counts == counts, "число шаров не совпало")
 	check(g2.balls.size() == bpos.size(), "после загрузки другое число шаров")
 	var moved := 0
@@ -361,7 +361,7 @@ func test_meadow_completes() -> void:
 ## «Сброс» включает режим: следующий выстрел рогаткой бесплатно перезапускает бездельника; кулдаун 30 с.
 func test_reset_relaunches_idler() -> void:
 	var g = await new_game(2)
-	g.rubles = 100000
+	g.coins = 100000
 	g._fire(g.start_pos)
 	g._fire(g.start_pos + Vector2(5, 0))
 	sim(g, 3.0)
@@ -370,7 +370,7 @@ func test_reset_relaunches_idler() -> void:
 	g.balls[2].earned = 50
 	var idler = g.balls[1]
 	var n0: int = g.balls.size()
-	var r0: int = g.rubles
+	var r0: int = g.coins
 	g._reset_stuck()
 	check(g.reset_armed, "«Сброс» не включил режим перезапуска")
 	g.cam.position = g.start_pos
@@ -381,7 +381,7 @@ func test_reset_relaunches_idler() -> void:
 	var from = g.sling_from
 	g._sling_release()
 	check(g.balls.size() == n0, "перезапуск купил новый шар")
-	check(g.rubles == r0, "перезапуск списал рубли")
+	check(g.coins == r0, "перезапуск списал монеты")
 	check(from != null and idler.pos.distance_to(from) < 0.01, "перезапущен не бездельник или не из точки нажатия")
 	check(absf(rad_to_deg(idler.vel.angle()) + 90.0) < 0.5, "бездельник полетел не в направлении прицела")
 	check(not g.reset_armed and g.reset_cd["basic"] > 29.0, "после перезапуска не начался кулдаун")
@@ -393,7 +393,7 @@ func test_reset_relaunches_idler() -> void:
 	g._reset_stuck()
 	check(not g.reset_armed, "повторное нажатие не выключило сброс")
 	# без денег рогатка не стреляет
-	g.rubles = 0
+	g.coins = 0
 	g._sling_begin(c)
 	g._sling_move(c + Vector2(0, 100))
 	g._sling_release()
@@ -498,7 +498,7 @@ func test_foreign_ui() -> void:
 			unlock_all(2, true)
 			GameData.lang_choice = code
 			GameData.apply_settings())
-		g.rubles = 100000
+		g.coins = 100000
 		g._show_upgrades(true)
 		g._refresh_ui()
 		var bad := []
@@ -523,7 +523,7 @@ func test_foreign_ui() -> void:
 ## Рогатка: оттягивание назад стреляет вперёд, вытягивание за область — отмена, касание — ничего.
 func test_slingshot() -> void:
 	var g = await new_game(2)
-	g.rubles = 100000
+	g.coins = 100000
 	g.cam.position = g.start_pos
 	g._clamp_cam()
 	var c: Vector2 = (g.start_pos - g.cam.position) * g.zoom + get_viewport().get_visible_rect().size * 0.5   # экранная точка старта
@@ -566,7 +566,7 @@ func test_gesture_hold_vs_pan() -> void:
 	fire_n(g, "basic", 20)
 	sim(g, 15.0)
 	g.balls.clear()
-	g.rubles = 100000
+	g.coins = 100000
 	g.cam.position = g.start_pos
 	g._clamp_cam()
 	var c: Vector2 = (g.start_pos - g.cam.position) * g.zoom + get_viewport().get_visible_rect().size * 0.5
@@ -624,3 +624,25 @@ func test_default_language() -> void:
 	check(GameData.lang_choice == "", "старое автоматическое значение языка считается выбором игрока")
 	GameData.lang_choice = keep
 	GameData.apply_settings()
+
+
+## Старое сохранение (до v0.14), где монеты назывались "rubles", загружается без потери денег.
+func test_old_save_currency_key() -> void:
+	var g = await new_game(2)
+	g.coins = 12345
+	g._save_state()
+	var path: String = g._save_path()
+	var f := FileAccess.open(path, FileAccess.READ)
+	var d: Dictionary = f.get_var()
+	f.close()
+	d["rubles"] = d["coins"]
+	d.erase("coins")
+	f = FileAccess.open(path, FileAccess.WRITE)
+	f.store_var(d)
+	f.close()
+	game.queue_free()
+	game = null
+	await get_tree().process_frame
+	game = GAME.instantiate()
+	add_child(game)
+	check(game.coins == 12345, "монеты из старого ключа rubles не загрузились: %d" % game.coins)

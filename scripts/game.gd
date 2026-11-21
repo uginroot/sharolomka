@@ -69,7 +69,7 @@ var st_lvl := PackedInt32Array()
 var st_sup := PackedByteArray()
 
 # ---- экономика карты
-var rubles := 0
+var coins := 0
 var counts := {}
 var dmg_lvl := {}
 var spd_lvl := {}
@@ -588,7 +588,7 @@ func _load_state() -> float:
 	var s = f.get_var()
 	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 5 or int(s.get("w", 0)) != W:
 		return 0.0
-	rubles = int(s.get("rubles", 0))
+	coins = int(s.get("coins", s.get("rubles", 0)))   # до v0.14 ключ назывался "rubles"
 	destroyed = int(s.get("destroyed", 0))
 	goal_done = bool(s.get("goal_done", false))
 	var c: Dictionary = s.get("counts", {})
@@ -640,7 +640,7 @@ func _save_state() -> void:
 			c.blob_dirty = false
 		out[ck] = c.blob
 	var s := {
-		"ver": 5, "w": W, "rubles": rubles, "destroyed": destroyed, "goal_done": goal_done,
+		"ver": 5, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
 		"counts": counts.duplicate(), "dmg": dmg_lvl.duplicate(), "spd": spd_lvl.duplicate(),
 		"saved_at": Time.get_unix_time_from_system(), "chunks": out,
 		"balls": balls.map(func(b): return [b.type, b.pos.x, b.pos.y, b.vel.x, b.vel.y]),
@@ -1045,7 +1045,7 @@ func _damage(id: int, amount: int, b) -> void:
 	c.hp[li] = h - dealt
 	c.changed = true
 	c.blob_dirty = true
-	rubles += dealt
+	coins += dealt
 	if b != null:
 		b.earned += dealt
 	_mark(ck)
@@ -1536,7 +1536,7 @@ func _sling_begin(p: Vector2) -> void:
 
 ## Можно ли сейчас выстрелить: включён сброс или хватает денег на новый шар.
 func _can_shoot() -> bool:
-	return reset_armed or rubles >= _ball_cost(selected)
+	return reset_armed or coins >= _ball_cost(selected)
 
 
 func _sling_move(p: Vector2) -> void:
@@ -1591,7 +1591,7 @@ func _draw_sling() -> void:
 	if sling_from == null:
 		txt = tr("Нажмите на открытую клетку")
 	elif not _can_shoot():
-		txt = tr("Не хватает рублей")
+		txt = tr("Не хватает монет")
 	var tw := minf(640.0, sling_view.size.x - 20.0)
 	var tp := Vector2(clampf(sling_start.x - tw * 0.5, 10.0, sling_view.size.x - tw - 10.0), sling_start.y - SLING_R - 16)
 	sling_view.draw_string(font, tp + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_CENTER, tw, 20, Color(0, 0, 0, 0.6))
@@ -1643,9 +1643,9 @@ func _fire(from = null) -> void:
 	var t := selected
 	var c := _ball_cost(t)
 	var lp: Vector2 = last_launch if from == null else from
-	if rubles < c:
+	if coins < c:
 		return
-	rubles -= c
+	coins -= c
 	counts[t] += 1
 	last_launch = lp
 	_spawn_ball(t, aim_angle, lp)
@@ -1654,9 +1654,9 @@ func _fire(from = null) -> void:
 
 func _buy_dmg(t: String) -> void:
 	var c := _dmg_cost(t)
-	if rubles < c:
+	if coins < c:
 		return
-	rubles -= c
+	coins -= c
 	dmg_lvl[t] += 1
 	_recalc_stats()
 	_refresh_ui()
@@ -1664,9 +1664,9 @@ func _buy_dmg(t: String) -> void:
 
 func _buy_spd(t: String) -> void:
 	var c := _spd_cost(t)
-	if rubles < c or int(spd_lvl[t]) >= SPD_MAX:
+	if coins < c or int(spd_lvl[t]) >= SPD_MAX:
 		return
-	rubles -= c
+	coins -= c
 	spd_lvl[t] += 1
 	_recalc_stats()
 	var sp := _speed(t)
@@ -1816,7 +1816,7 @@ func _icon_rect(tex: Texture2D, sz: float) -> TextureRect:
 	return r
 
 
-## «Пилюля» со значком и числом — для рублей и U.
+## «Пилюля» со значком и числом — для монет и U.
 func _pill(tex: Texture2D, color: Color) -> Label:
 	var p := PanelContainer.new()
 	p.theme_type_variation = "Pill"
@@ -2155,7 +2155,7 @@ func _rebuild_rows() -> void:
 func _refresh_ui() -> void:
 	if lbl_rub == null:
 		return
-	lbl_rub.text = GameData.fmt(rubles)
+	lbl_rub.text = GameData.fmt(coins)
 	lbl_u.text = str(GameData.u)
 	var frac := float(destroyed) / maxf(1.0, float(goal))
 	prog_bar.value = minf(1.0, frac)
@@ -2170,7 +2170,7 @@ func _refresh_ui() -> void:
 		# цена следующего шара прямо на фишке; не хватает денег — фишка тусклее
 		var price := _ball_cost(t)
 		chips[t].text = "×%d · %s" % [counts[t], GameData.fmt(price)]
-		chips[t].modulate = Color(1, 1, 1, 1.0 if rubles >= price else 0.6)
+		chips[t].modulate = Color(1, 1, 1, 1.0 if coins >= price else 0.6)
 	var cd: float = reset_cd[selected]
 	if reset_armed:
 		btn_reset.text = tr("Сброс: прицельтесь")
@@ -2183,7 +2183,7 @@ func _refresh_ui() -> void:
 
 	if not upg.visible:
 		return
-	upg_rub.text = GameData.fmt(rubles)
+	upg_rub.text = GameData.fmt(coins)
 	upg_u.text = str(GameData.u)
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
@@ -2191,7 +2191,7 @@ func _refresh_ui() -> void:
 		var dc := _dmg_cost(t)
 		r["dmg"]["label"].text = tr("Урон %d → %d") % [_damage_of(t), _damage_of_next(t)]
 		r["dmg"]["button"].text = GameData.fmt(dc)
-		r["dmg"]["button"].disabled = rubles < dc
+		r["dmg"]["button"].disabled = coins < dc
 		var sl := int(spd_lvl[t])
 		var cps := _speed(t) / CELL
 		if sl >= SPD_MAX:
@@ -2207,7 +2207,7 @@ func _refresh_ui() -> void:
 		else:
 			var scost := _spd_cost(t)
 			r["spd"]["button"].text = GameData.fmt(scost)
-			r["spd"]["button"].disabled = rubles < scost
+			r["spd"]["button"].disabled = coins < scost
 
 	for t in perk_refs:
 		var r: Dictionary = perk_refs[t]

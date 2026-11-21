@@ -63,7 +63,7 @@ const T := {
 	"Отпустите — отмена": "Suelta para cancelar",
 	"Нажмите на открытую клетку": "Pulsa en una casilla abierta",
 	"Отпустите — перезапуск бездельника": "Suelta para relanzar la bola ociosa",
-	"Не хватает рублей": "No hay suficientes rublos",
+	"Не хватает монет": "No hay suficientes monedas",
 	"Сброс: прицельтесь": "Reinicio: apunta",
 	"Сброс · %d с": "Reinicio · %d s",
 	"Обычный": "Básica",

@@ -123,7 +123,7 @@ func _run() -> void:
 
 	# рогатка: нажать и оттянуть вниз — шар летит вверх
 	var vs := get_viewport().get_visible_rect().size
-	g.rubles = 5000
+	g.coins = 5000
 	await _wait(0.2)
 	var n_before: int = g.balls.size()
 	# нажимаем в открытую клетку у старта
@@ -209,7 +209,7 @@ func _run() -> void:
 	check(await _tap("Сброс"), "кнопка «Сброс» нажимается")
 	check(g.reset_armed, "сброс включил режим перезапуска")
 	var n_reset: int = g.balls.size()
-	var r_reset: int = g.rubles
+	var r_reset: int = g.coins
 	var pr := Vector2(vs.x * 0.5, vs.y * 0.5)
 	g.cam.position = g.start_pos
 	g._clamp_cam()
@@ -222,7 +222,7 @@ func _run() -> void:
 	await _shot("reset_aim")
 	_touch(pr + Vector2(0, 125), false)
 	await get_tree().process_frame
-	check(g.balls.size() == n_reset and g.rubles >= r_reset, "перезапуск бездельника без покупки")
+	check(g.balls.size() == n_reset and g.coins >= r_reset, "перезапуск бездельника без покупки")
 	check(not g.reset_armed and g.reset_cd["basic"] > 25.0, "после перезапуска начался кулдаун")
 	await _wait(3.0)
 	await _shot("game_later")
@@ -259,7 +259,7 @@ func _run() -> void:
 	check(await _tap("Continue"), "в английском меню есть Continue")
 	await _wait(1.5)
 	var g3 = get_tree().current_scene
-	g3.rubles = 50000
+	g3.coins = 50000
 	await _wait(0.3)
 	await _shot("game_en")
 	await _tap("Upgrades")
@@ -278,7 +278,7 @@ func _run() -> void:
 		m._open(0)
 		await _wait(1.2)
 		var gg = get_tree().current_scene
-		gg.rubles = 50000
+		gg.coins = 50000
 		gg._show_upgrades(true)
 		await _wait(0.4)
 		await _shot("upgrades_" + code)

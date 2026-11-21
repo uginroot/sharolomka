@@ -63,7 +63,7 @@ const T := {
 	"Отпустите — отмена": "İptal için bırak",
 	"Нажмите на открытую клетку": "Açık bir kareye dokun",
 	"Отпустите — перезапуск бездельника": "Tembel topu yeniden atmak için bırak",
-	"Не хватает рублей": "Yeterli ruble yok",
+	"Не хватает монет": "Yeterli jeton yok",
 	"Сброс: прицельтесь": "Yeniden at: nişan al",
 	"Сброс · %d с": "Yeniden at · %d sn",
 	"Обычный": "Normal",
