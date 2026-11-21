@@ -1,5 +1,7 @@
 # Шароломка (Godot 4.3)
 
+Спецификация: [docs/SPEC.md](docs/SPEC.md). Памятка для разработки: [CLAUDE.md](CLAUDE.md).
+
 ![Build](../../actions/workflows/build.yml/badge.svg)
 
 Сборки для Android, Windows и Linux делает GitHub Actions (.github/workflows/build.yml):
@@ -49,3 +51,10 @@
 - Меню работает в low processor mode (кадры рисуются только при изменениях).
 - В меню: «Экономия: 30 FPS» и «Экран: не гаснет / как обычно» (по умолчанию экран гаснет как обычно).
 - Рендерер GL Compatibility, VSync включён, лимит 60 FPS.
+
+## Тесты
+```bash
+godot --headless --path . res://tests/test_runner.tscn
+xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 720x1600 res://tests/ui_playtest.tscn
+```
+CI запускает оба набора перед каждой сборкой; скриншоты UI-теста — в артефакте `screenshots`.

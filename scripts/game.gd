@@ -309,13 +309,16 @@ func _region(rx: int, ry: int):
 		var x0 := rx * region_size
 		var y0 := ry * region_size
 		var has_start := Rect2i(x0 - 3, y0 - 3, region_size + 6, region_size + 6).has_point(start_cell)
-		if rng.randf() < float(map["density"]) and not has_start:
+		# картинка целиком помещается и в регион, и в карту (у края карты регион обрезан)
+		var span_x := mini(region_size, W - x0) - 6
+		var span_y := mini(region_size, H - y0) - 6
+		var span := mini(span_x, span_y)
+		if rng.randf() < float(map["density"]) and not has_start and span >= 12:
 			var tl: Array = map["templates"]
 			var tpl: String = tl[rng.randi() % tl.size()]
-			var span := region_size - 6
 			var size := maxi(12, int(span * rng.randf_range(0.5, 1.0)))
-			var px := x0 + 3 + rng.randi_range(0, span - size)
-			var py := y0 + 3 + rng.randi_range(0, span - size)
+			var px := x0 + 3 + rng.randi_range(0, span_x - size)
+			var py := y0 + 3 + rng.randi_range(0, span_y - size)
 			res = _build_picture([[tpl, Rect2i(px, py, size, size)]], Rect2i(px - 1, py - 1, size + 2, size + 2))
 	region_cache[key] = res
 	return res
@@ -353,6 +356,14 @@ func _build_picture(items: Array, box: Rect2i) -> Dictionary:
 				cav.append(i)
 				mask[i] = 4
 		_entrance_local(mask, bw, bh, outlines[pi], cav, st)
+	# клетки за краем карты — не проход
+	for i in bw * bh:
+		@warning_ignore("integer_division")
+		var gx := box.position.x + i % bw
+		@warning_ignore("integer_division")
+		var gy := box.position.y + i / bw
+		if gx >= W or gy >= H:
+			mask[i] = 2
 	# заливка от краёв: всё недостижимое — стена
 	var reach := PackedByteArray()
 	reach.resize(bw * bh)
@@ -911,9 +922,12 @@ func _hit_cell(b, id: int) -> bool:
 					if xx != cx or yy != cy:
 						_damage(yy * W + xx, sd, b)
 		3:
+			# пролетает сквозь добитый квадрат; с «Призраком» — сквозь любой видимый,
+			# но в туман не уходит: от скрытых квадратов отскакивает
 			var before := _hp_of(id)
+			var visible := _vis_id(id)
 			_damage(id, dmg, b)
-			if sup or dmg >= before:
+			if dmg >= before or (sup and visible):
 				b.recent[id] = time_acc
 				return true
 		4:
@@ -923,6 +937,11 @@ func _hit_cell(b, id: int) -> bool:
 		_:
 			_damage(id, dmg, b)
 	return false
+
+
+func _vis_id(id: int) -> bool:
+	@warning_ignore("integer_division")
+	return _vis_at(id % W, id / W)
 
 
 func _hp_of(id: int) -> int:

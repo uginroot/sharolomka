@@ -1,0 +1,31 @@
+# Шароломка — памятка для новой сессии
+
+Игра на Godot 4.3 (GDScript) для Android/Windows/Linux. Владелец — Антон (GitHub: uginroot).
+Общение, интерфейс и комментарии в коде — на русском.
+
+## С чего начать
+1. Прочитай `docs/SPEC.md` — как игра должна работать, числа, архитектура, история решений.
+2. Прогони тесты (ниже) — убедись, что всё зелёное, прежде чем менять код.
+
+## Команды
+```bash
+# Godot 4.3: https://github.com/godotengine/godot/releases/tag/4.3-stable
+godot --headless --path . --import                              # первый раз
+godot --headless --path . res://tests/test_runner.tscn          # тесты логики (код выхода = число упавших)
+godot --headless --path . res://tests/test_runner.tscn -- test_fire   # один тест
+xvfb-run -a -s "-screen 0 800x1700x24" godot --path . --rendering-driver opengl3 \
+  --resolution 720x1600 res://tests/ui_playtest.tscn            # UI-тест касаниями + скриншоты в build/screens/
+```
+
+## Правила
+- Любое изменение поведения → обнови `docs/SPEC.md` (включая таблицу «История решений») в том же коммите.
+- Нашёл баг → сначала тест, который его ловит (`tests/test_runner.gd`, функции `test_*`), потом исправление.
+- После изменений интерфейса **посмотри скриншоты** UI-теста (720×1600, пропорции 20:9) — не выпускай вслепую.
+- Производительность и батарея — требование владельца: бюджет в SPEC §7, не ломай тест `test_performance_budget`.
+- Не используй MultiMesh для шаров (не рисуется на Android). Интерфейс в CanvasLayer — задавай `theme` явно.
+- Формат сохранения карт поменялся → повысь `ver` в `game.gd` (`_save_state`/`_load_state`).
+
+## Релиз
+- push в `main` → CI: тесты → UI-тесты → сборки (артефакты в Actions, там же скриншоты).
+- Релиз: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Release с APK, zip (Windows), tar.gz (Linux).
+- Ключ подписи Android — в секретах репозитория; у владельца есть копия. В репозиторий ключи и токены не коммитить.

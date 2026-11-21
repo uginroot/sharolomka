@@ -12,8 +12,107 @@ env:
   GODOT_STATUS: "stable"
 
 jobs:
+  tests:
+    name: Тесты логики
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot and templates
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-${{ env.GODOT_STATUS }}-v1
+
+      - name: Download Godot and templates
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          V="${GODOT_VERSION}-${GODOT_STATUS}"
+          BASE="https://github.com/godotengine/godot/releases/download/${V}"
+          mkdir -p ~/godot
+          curl -fsSL -o /tmp/godot.zip "${BASE}/Godot_v${V}_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          mv /tmp/godot/Godot_v${V}_linux.x86_64 ~/godot/godot
+          chmod +x ~/godot/godot
+          # Из ~1 ГБ шаблонов берём только нужные (~450 МБ), чтобы кэш был меньше
+          T=~/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}
+          mkdir -p "$T"
+          curl -fsSL -o /tmp/tpl.tpz "${BASE}/Godot_v${V}_export_templates.tpz"
+          unzip -j -q /tmp/tpl.tpz \
+            templates/version.txt \
+            templates/linux_debug.x86_64 templates/linux_release.x86_64 \
+            templates/windows_debug_x86_64.exe templates/windows_release_x86_64.exe \
+            templates/windows_debug_x86_64_console.exe templates/windows_release_x86_64_console.exe \
+            templates/android_debug.apk templates/android_release.apk \
+            -d "$T"
+          rm /tmp/tpl.tpz /tmp/godot.zip
+
+      - name: Import project
+        run: ~/godot/godot --headless --path . --import || true
+
+      - name: Run tests
+        run: ~/godot/godot --headless --path . res://tests/test_runner.tscn
+
+  ui-tests:
+    name: UI-тесты и скриншоты
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot and templates
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-${{ env.GODOT_STATUS }}-v1
+
+      - name: Download Godot and templates
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          V="${GODOT_VERSION}-${GODOT_STATUS}"
+          BASE="https://github.com/godotengine/godot/releases/download/${V}"
+          mkdir -p ~/godot
+          curl -fsSL -o /tmp/godot.zip "${BASE}/Godot_v${V}_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          mv /tmp/godot/Godot_v${V}_linux.x86_64 ~/godot/godot
+          chmod +x ~/godot/godot
+          # Из ~1 ГБ шаблонов берём только нужные (~450 МБ), чтобы кэш был меньше
+          T=~/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}
+          mkdir -p "$T"
+          curl -fsSL -o /tmp/tpl.tpz "${BASE}/Godot_v${V}_export_templates.tpz"
+          unzip -j -q /tmp/tpl.tpz \
+            templates/version.txt \
+            templates/linux_debug.x86_64 templates/linux_release.x86_64 \
+            templates/windows_debug_x86_64.exe templates/windows_release_x86_64.exe \
+            templates/windows_debug_x86_64_console.exe templates/windows_release_x86_64_console.exe \
+            templates/android_debug.apk templates/android_release.apk \
+            -d "$T"
+          rm /tmp/tpl.tpz /tmp/godot.zip
+
+      - name: Install virtual display
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libgl1-mesa-dri mesa-utils >/dev/null
+
+      - name: Import project
+        run: ~/godot/godot --headless --path . --import || true
+
+      - name: Run UI playtest
+        run: xvfb-run -a -s "-screen 0 800x1700x24" ~/godot/godot --path . --rendering-driver opengl3 --resolution 720x1600 res://tests/ui_playtest.tscn
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: build/screens/*.png
+
   export:
     name: ${{ matrix.preset }}
+    needs: [tests, ui-tests]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
