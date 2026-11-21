@@ -128,7 +128,9 @@ func _run() -> void:
 	var n_before: int = g.balls.size()
 	var p := Vector2(vs.x * 0.5, vs.y * 0.5)
 	_touch(p, true)
-	await get_tree().process_frame
+	await _wait(0.35)   # удержание — начинается прицел
+	check(g.sling, "удержание пальца включает прицел")
+	await _shot("hold")
 	for k in 6:
 		_drag(p + Vector2(0, 25 * (k + 1)), Vector2(0, 25))
 		await get_tree().process_frame
@@ -141,7 +143,7 @@ func _run() -> void:
 	check(absf(g.aim_angle + 90.0) < 1.0, "рогатка: оттянули вниз — летит вверх")
 	# отмена: вытянуть за область наведения
 	_touch(p, true)
-	await get_tree().process_frame
+	await _wait(0.35)
 	for k in 8:
 		_drag(p + Vector2(40 * (k + 1), 0), Vector2(40, 0))
 		await get_tree().process_frame
@@ -151,6 +153,18 @@ func _run() -> void:
 	check(g.balls.size() == n_before + 1, "рогатка: за областью наведения — отмена")
 	var a0: float = g.aim_angle
 
+	# одним пальцем сразу повёл — перемещение карты, без выстрела
+	var cam0: Vector2 = g.cam.position
+	var n_pan: int = g.balls.size()
+	_touch(p, true)
+	await get_tree().process_frame
+	for k in 8:
+		_drag(p + Vector2(0, 30 * (k + 1)), Vector2(0, 30))
+		await get_tree().process_frame
+	_touch(p + Vector2(0, 240), false)
+	await _wait(0.4)
+	check(g.cam.position.distance_to(cam0) > 20.0, "одним пальцем карта двигается")
+	check(g.balls.size() == n_pan and not g.sling, "перемещение карты не стреляет")
 	# щипок не сбивает прицел и меняет масштаб
 	var a1: float = g.aim_angle
 	var z0: float = g.zoom

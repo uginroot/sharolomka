@@ -514,3 +514,44 @@ func test_slingshot() -> void:
 	g._sling_move(far + Vector2(0, 100))
 	g._sling_release()
 	check(g.balls.size() == n0 + 1, "рогатка из тумана выстрелила")
+
+
+## Жест одним пальцем: сразу повёл — двигается карта; подержал — прицел; короткое касание — ничего.
+func test_gesture_hold_vs_pan() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	fire_n(g, "basic", 20)
+	sim(g, 15.0)
+	g.balls.clear()
+	g.rubles = 100000
+	g.cam.position = g.start_pos
+	g._clamp_cam()
+	var c: Vector2 = (g.start_pos - g.cam.position) * g.zoom + get_viewport().get_visible_rect().size * 0.5
+	# 1. сразу повёл — перемещение карты, без прицела и выстрела
+	var cam0: Vector2 = g.cam.position
+	g._press_down(c)
+	g._hold_tick(0.05)
+	g._press_drag(c + Vector2(0, 60), Vector2(0, 60))
+	check(g.panning and not g.sling, "быстрый сдвиг пальца не перешёл в перемещение карты")
+	g._hold_tick(0.5)
+	check(not g.sling, "после начала перемещения прицел всё равно включился")
+	g._press_up()
+	check(g.cam.position != cam0, "карта не сдвинулась")
+	check(g.balls.size() == 0, "перемещение карты выстрелило")
+	# 2. подержал — прицел, оттянул и отпустил — выстрел
+	g.cam.position = g.start_pos
+	g._clamp_cam()
+	c = (g.start_pos - g.cam.position) * g.zoom + get_viewport().get_visible_rect().size * 0.5
+	g._press_down(c)
+	g._hold_tick(0.1)
+	check(not g.sling, "прицел включился раньше удержания")
+	g._hold_tick(0.2)
+	check(g.sling, "после удержания прицел не включился")
+	g._press_drag(c + Vector2(0, 100), Vector2(0, 100))
+	g._press_up()
+	check(g.balls.size() == 1, "прицел с удержанием не выстрелил")
+	# 3. короткое касание — ничего
+	g._press_down(c)
+	g._hold_tick(0.1)
+	g._press_up()
+	g._hold_tick(0.5)
+	check(not g.sling and g.balls.size() == 1, "короткое касание что-то сделало")

@@ -26,6 +26,8 @@ const WALL_SEAM := Color(0.8, 0.83, 0.9)
 const GRID := Color(1, 1, 1, 0.055)
 const SLING_R := 230.0          # радиус области наведения рогатки, px экрана
 const SLING_MIN := 28.0         # меньше — это касание, а не оттягивание
+const HOLD_TIME := 0.22         # удержание пальца на месте до начала прицеливания, с
+const PAN_SLOP := 12.0          # сдвиг пальца раньше удержания — это перемещение карты, px
 
 # ---- карта
 var map: Dictionary
@@ -113,6 +115,10 @@ var sling_start := Vector2.ZERO # где нажали (экран)
 var sling_pos := Vector2.ZERO   # где палец сейчас (экран)
 var sling_cancel := false       # палец вытянут за область наведения
 var sling_view: Control
+var press_pending := false      # палец нажат, ещё не ясно: прицел или перемещение
+var press_t := 0.0
+var press_pos := Vector2.ZERO
+var panning := false
 var saved_balls: Array = []
 var last_launch := Vector2.ZERO  # откуда был последний выстрел — для кнопки «Выстрел» и «Сброса»
 var sling_from = null           # точка вылета для текущей рогатки (мир) или null — нажали не туда
@@ -734,9 +740,11 @@ func _process(delta: float) -> void:
 
 	_redraw_dirty()
 	overlay.queue_redraw()   # прицел привязан к центру экрана — он дешёвый, рисуем каждый кадр
-	if sling or sling_view.get_meta("was", false):
+	_hold_tick(delta)
+	var active := sling or press_pending
+	if active or sling_view.get_meta("was", false):
 		sling_view.queue_redraw()
-		sling_view.set_meta("was", sling)
+		sling_view.set_meta("was", active)
 	ball_layer.queue_redraw()
 
 	if toast_t > 0.0:
@@ -1346,15 +1354,6 @@ func _draw_overlay() -> void:
 			overlay.draw_line(lp, tip - dir * (18.0 / zoom), acol, 5.0 / zoom)
 			overlay.draw_colored_polygon(PackedVector2Array([tip, tip - dir * (26.0 / zoom) + side,
 				tip - dir * (26.0 / zoom) - side]), acol)
-	elif not sling:
-		# еле заметная отметка последнего выстрела — отсюда стреляет кнопка «Выстрел»
-		var faint := Color(col.r, col.g, col.b, 0.35)
-		overlay.draw_arc(last_launch, 10.0 / zoom, 0.0, TAU, 24, faint, 2.0 / zoom)
-		var len := 60.0 / zoom
-		var k := 14.0 / zoom
-		while k < len:
-			overlay.draw_line(last_launch + dir * k, last_launch + dir * minf(k + 6.0 / zoom, len), faint, 2.0 / zoom)
-			k += 12.0 / zoom
 	var font: Font = GameData.font_bold
 	var fs := int(clampf(26.0 / zoom, 26.0, 4000.0))
 	for p in popups:
@@ -1423,8 +1422,8 @@ func _over_ui(p: Vector2) -> bool:
 	return top_bar.get_global_rect().has_point(p) or bottom_bar.get_global_rect().has_point(p)
 
 
-## Рогатка: нажать на карту и оттянуть назад — шар полетит в противоположную сторону.
-## Палец за пределами области наведения — отмена. Два пальца — масштаб и сдвиг карты.
+## Один палец: сразу повёл — перемещение карты; нажал и подержал HOLD_TIME — прицел-рогатка
+## (оттянуть назад, отпустить — выстрел; за областью наведения — отмена). Два пальца — масштаб и сдвиг.
 func _unhandled_input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
@@ -1432,14 +1431,14 @@ func _unhandled_input(e: InputEvent) -> void:
 				return
 			touches[e.index] = e.position
 			if touches.size() == 1 and not pinch:
-				_sling_begin(e.position)
+				_press_down(e.position)
 			elif touches.size() >= 2:
-				_sling_abort()
+				_press_cancel()
 				pinch = true
 				_pinch_reset()
 		else:
-			if touches.has(e.index) and touches.size() == 1 and sling:
-				_sling_release()
+			if touches.has(e.index) and touches.size() == 1:
+				_press_up()
 			touches.erase(e.index)
 			if touches.size() >= 2:
 				_pinch_reset()
@@ -1451,8 +1450,8 @@ func _unhandled_input(e: InputEvent) -> void:
 		touches[e.index] = e.position
 		if pinch and touches.size() >= 2:
 			_pinch_update()
-		elif sling:
-			_sling_move(e.position)
+		elif not pinch:
+			_press_drag(e.position, e.relative)
 	elif e is InputEventMouseButton and e.device != InputEvent.DEVICE_ID_EMULATION:
 		if e.pressed and _over_ui(e.position):
 			return
@@ -1462,17 +1461,63 @@ func _unhandled_input(e: InputEvent) -> void:
 			_set_zoom(zoom / 1.15, e.position)
 		elif e.button_index == MOUSE_BUTTON_LEFT:
 			if e.pressed:
-				_sling_begin(e.position)
-			elif sling:
-				_sling_release()
+				_press_down(e.position)
+			else:
+				_press_up()
 		elif e.button_index == MOUSE_BUTTON_RIGHT or e.button_index == MOUSE_BUTTON_MIDDLE:
 			mouse_pan = e.pressed
 	elif e is InputEventMouseMotion and e.device != InputEvent.DEVICE_ID_EMULATION:
 		if mouse_pan:
 			cam.position -= e.relative / zoom
 			_clamp_cam()
-		elif sling:
-			_sling_move(e.position)
+		elif e.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			_press_drag(e.position, e.relative)
+
+
+func _press_down(p: Vector2) -> void:
+	press_pending = true
+	press_t = 0.0
+	press_pos = p
+	panning = false
+
+
+func _press_drag(p: Vector2, rel: Vector2) -> void:
+	if sling:
+		_sling_move(p)
+	elif panning:
+		cam.position -= rel / zoom
+		_clamp_cam()
+	elif press_pending and p.distance_to(press_pos) > PAN_SLOP:
+		# повёл сразу — это перемещение карты
+		press_pending = false
+		panning = true
+		cam.position -= (p - press_pos) / zoom
+		_clamp_cam()
+
+
+func _press_up() -> void:
+	if sling:
+		_sling_release()
+	press_pending = false
+	panning = false
+
+
+func _press_cancel() -> void:
+	press_pending = false
+	panning = false
+	_sling_abort()
+
+
+## Палец держат на месте — после HOLD_TIME начинается прицеливание.
+func _hold_tick(delta: float) -> void:
+	if not press_pending:
+		return
+	press_t += delta
+	if press_t >= HOLD_TIME:
+		press_pending = false
+		_sling_begin(press_pos)
+		if OS.has_feature("mobile"):
+			Input.vibrate_handheld(15)
 
 
 func _sling_begin(p: Vector2) -> void:
@@ -1509,6 +1554,10 @@ func _sling_abort() -> void:
 
 
 func _draw_sling() -> void:
+	if press_pending and press_t > 0.06:
+		# колечко дорисовывается, пока палец держат: заполнилось — начинается прицел
+		var f := clampf(press_t / HOLD_TIME, 0.0, 1.0)
+		sling_view.draw_arc(press_pos, 30.0, -PI / 2.0, -PI / 2.0 + TAU * f, 40, Color(1, 1, 1, 0.75), 4.0, true)
 	if not sling:
 		return
 	var pull := sling_start - sling_pos
@@ -1941,7 +1990,7 @@ func _show_upgrades(show: bool) -> void:
 	upg.visible = show
 	touches.clear()
 	pinch = false
-	_sling_abort()
+	_press_cancel()
 	_refresh_ui()
 
 
