@@ -95,7 +95,7 @@ jobs:
           rm /tmp/tpl.tpz /tmp/godot.zip
 
       - name: Install virtual display
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libgl1-mesa-dri mesa-utils >/dev/null
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libgl1-mesa-dri mesa-utils fonts-noto-core fonts-noto-cjk >/dev/null
 
       - name: Import project
         run: ~/godot/godot --headless --path . --import || true

@@ -265,5 +265,26 @@ func _run() -> void:
 	await _tap("Upgrades")
 	await _wait(0.4)
 	await _shot("upgrades_en")
+	# другие письменности: латиница с длинными словами, иероглифы, арабское (справа налево), деванагари
+	for code in ["de", "zh_CN", "ar", "hi", "ja"]:
+		GameData.lang_choice = code
+		GameData.apply_settings()
+		get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+		await _wait(0.6)
+		var m = get_tree().current_scene
+		m._show_settings(true)
+		await _wait(0.3)
+		await _shot("settings_" + code)
+		m._open(0)
+		await _wait(1.2)
+		var gg = get_tree().current_scene
+		gg.rubles = 50000
+		gg._show_upgrades(true)
+		await _wait(0.4)
+		await _shot("upgrades_" + code)
+		gg._show_upgrades(false)
+		await _wait(0.3)
+		await _shot("game_" + code)
+		check(GameData.lang == code and TranslationServer.get_locale() == code, "язык %s включился" % code)
 	GameData.lang_choice = "ru"
 	GameData.apply_settings()

@@ -426,9 +426,9 @@ func test_performance_budget() -> void:
 	check(per_frame < 4.0, "симуляция %.2f мс на кадр — слишком медленно" % per_frame)
 
 
-## У каждой строки в tr("...") есть английский перевод с теми же плейсхолдерами.
+## У каждой строки в tr("...") есть перевод на каждый язык с теми же плейсхолдерами.
 func test_translations_complete() -> void:
-	var en: Dictionary = preload("res://scripts/i18n.gd").EN
+	var I18n = preload("res://scripts/i18n.gd")
 	var re := RegEx.new()
 	re.compile('tr\\("((?:[^"\\\\]|\\\\.)*)"\\)')
 	var ph := RegEx.new()
@@ -440,22 +440,31 @@ func test_translations_complete() -> void:
 		var src := FileAccess.get_file_as_string("res://scripts/" + f)
 		for m in re.search_all(src):
 			keys[m.get_string(1).replace("\\n", "\n").replace('\\"', '"')] = f
-	# названия и описания шаров и карт тоже переводятся
 	for t in GameData.TYPE_ORDER:
 		for k in ["name", "desc", "perk", "perk_desc", "super", "super_desc"]:
 			keys[GameData.TYPES[t][k]] = "game_data.gd"
 	for mp in preload("res://scripts/maps.gd").get_maps():
 		keys[mp["name"]] = "maps.gd"
-	var missing := 0
-	for k in keys:
-		if not en.has(k):
-			missing += 1
-			check(false, "нет перевода (%s): %s" % [keys[k], k])
+	check(I18n.LANGS.size() >= 16, "языков меньше 16")
+	for code in I18n.LANGS:
+		if code == "ru":
 			continue
-		var a := ph.search_all(k).map(func(m): return m.get_string())
-		var b := ph.search_all(en[k]).map(func(m): return m.get_string())
-		check(a == b, "плейсхолдеры не совпадают: «%s» → «%s»" % [k, en[k]])
-	print("    строк для перевода: %d" % keys.size())
+		var tab: Dictionary = I18n.table(code)
+		var missing := 0
+		for k in keys:
+			if not tab.has(k):
+				missing += 1
+				if missing <= 3:
+					check(false, "%s: нет перевода (%s): %s" % [code, keys[k], k])
+				continue
+			var a := ph.search_all(k).map(func(m): return m.get_string())
+			var b := ph.search_all(tab[k]).map(func(m): return m.get_string())
+			check(a == b, "%s: плейсхолдеры не совпадают: «%s» → «%s»" % [code, k, tab[k]])
+			check(String(tab[k]).strip_edges() != "", "%s: пустой перевод «%s»" % [code, k])
+		check(missing == 0, "%s: всего без перевода %d" % [code, missing])
+		for k in tab:
+			check(keys.has(k), "%s: лишний ключ (строка больше не используется): %s" % [code, k])
+	print("    строк: %d, языков: %d" % [keys.size(), I18n.LANGS.size()])
 
 
 func _cyrillic_texts(node: Node, out: Array) -> void:
@@ -480,30 +489,33 @@ func test_russian_ui() -> void:
 	check(g.btn_reset.text.begins_with("Сброс"), "кнопка сброса не на русском: %s" % g.btn_reset.text)
 
 
-## На английском в интерфейсе игры и меню нет русских букв.
-func test_english_ui() -> void:
-	var g = await new_game(2, func():
-		unlock_all(2, true)
-		GameData.lang_choice = "en"
-		GameData.apply_settings())
-	g.rubles = 100000
-	g._show_upgrades(true)
-	g._refresh_ui()
-	var bad := []
-	_cyrillic_texts(g.ui_root, bad)
-	check(bad.is_empty(), "русский текст в английской игре: %s" % str(bad))
-	var menu = load("res://scenes/main_menu.tscn").instantiate()
-	add_child(menu)
-	await get_tree().process_frame
-	menu._show_settings(true)
-	await get_tree().process_frame
-	var bad2 := []
-	_cyrillic_texts(menu, bad2)
-	menu._show_settings(false)
-	await get_tree().process_frame
-	_cyrillic_texts(menu, bad2)
-	check(bad2.is_empty(), "русский текст в английском меню: %s" % str(bad2))
-	menu.queue_free()
+## На любом языке, кроме русского, в интерфейсе игры и меню нет русских букв.
+func test_foreign_ui() -> void:
+	for code in GameData.LANGS:
+		if code == "ru":
+			continue
+		var g = await new_game(2, func():
+			unlock_all(2, true)
+			GameData.lang_choice = code
+			GameData.apply_settings())
+		g.rubles = 100000
+		g._show_upgrades(true)
+		g._refresh_ui()
+		var bad := []
+		_cyrillic_texts(g.ui_root, bad)
+		check(bad.is_empty(), "%s: русский текст в игре: %s" % [code, str(bad)])
+		var menu = load("res://scenes/main_menu.tscn").instantiate()
+		add_child(menu)
+		await get_tree().process_frame
+		var bad2 := []
+		_cyrillic_texts(menu, bad2)
+		menu._show_settings(true)
+		await get_tree().process_frame
+		var bad3 := []
+		_cyrillic_texts(menu, bad3)
+		menu.queue_free()
+		check(bad2.is_empty(), "%s: русский текст в меню: %s" % [code, str(bad2)])
+		check(bad3.is_empty(), "%s: русский текст в настройках: %s" % [code, str(bad3)])
 	GameData.lang_choice = "ru"
 	GameData.apply_settings()
 
@@ -591,12 +603,14 @@ func test_gesture_hold_vs_pan() -> void:
 
 ## Язык по умолчанию — язык системы: русский для русской системы, для любой другой — английский.
 func test_default_language() -> void:
-	for pair in [["ru", "ru"], ["ru_RU", "ru"], ["en", "en"], ["en_US", "en"], ["de", "en"], ["uk", "en"], ["kk", "en"], ["zh_CN", "en"]]:
+	for pair in [["ru", "ru"], ["ru_RU", "ru"], ["en", "en"], ["en_US", "en"], ["de_DE", "de"], ["es_MX", "es"],
+			["pt_PT", "pt_BR"], ["pt_BR", "pt_BR"], ["zh_TW", "zh_CN"], ["zh", "zh_CN"], ["ja", "ja"], ["ar_EG", "ar"],
+			["hi_IN", "hi"], ["bn", "bn"], ["uk", "en"], ["kk", "en"], ["xx", "en"]]:
 		check(GameData.system_lang(pair[0]) == pair[1], "система %s → %s, а не %s" % [pair[0], GameData.system_lang(pair[0]), pair[1]])
 	var keep: String = GameData.lang_choice
 	GameData.lang_choice = ""
 	GameData.apply_settings()
-	check(GameData.lang == GameData.system_lang(OS.get_locale_language()), "без выбора язык не системный")
+	check(GameData.lang == GameData.system_lang(OS.get_locale()), "без выбора язык не системный")
 	# выбор игрока сохраняется и побеждает систему; старый автоматический ключ "lang" игнорируется
 	GameData.lang_choice = "en"
 	GameData.save_game()

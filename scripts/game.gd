@@ -2083,6 +2083,7 @@ func _rebuild_rows() -> void:
 			chip.toggle_mode = true
 			chip.button_group = chip_group
 			chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			chip.text_direction = Control.TEXT_DIRECTION_LTR   # «×2 · 46» не переворачивается в арабском
 			chip.button_pressed = (t == selected)
 			chip.pressed.connect(_select.bind(t))
 			chips_box.add_child(chip)

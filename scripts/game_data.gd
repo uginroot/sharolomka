@@ -3,8 +3,8 @@ extends Node
 
 const SAVE_PATH := "user://save.json"
 const I18n = preload("res://scripts/i18n.gd")
-const LANGS := ["ru", "en"]
-const LANG_NAMES := {"ru": "Русский", "en": "English"}
+const LANGS := I18n.LANGS
+const LANG_NAMES := I18n.NAMES
 const PERK_MAX := 5
 const SUPER_COST := 15
 const TYPE_ORDER := ["basic", "splash", "sniper", "pierce", "poison"]
@@ -67,24 +67,28 @@ var lang_choice := ""       # выбор игрока; пусто — как в 
 
 
 func _ready() -> void:
-	var tr_en := Translation.new()
-	tr_en.locale = "en"
-	for k in I18n.EN:
-		tr_en.add_message(k, I18n.EN[k])
-	TranslationServer.add_translation(tr_en)
+	for code in I18n.LANGS:
+		var tab := I18n.table(code)
+		if tab.is_empty():
+			continue
+		var t := Translation.new()
+		t.locale = code
+		for k in tab:
+			t.add_message(k, tab[k])
+		TranslationServer.add_translation(t)
 	_reset_defaults()
 	load_game()
 	apply_settings()
 	get_tree().root.theme = make_theme()   # тема на всё приложение, включая диалоги
 
 
-## Язык системы → язык игры: русский только для русской системы, для всех остальных — английский.
+## Язык системы → язык игры: поддерживаемый язык системы, иначе английский.
 static func system_lang(code: String) -> String:
-	return "ru" if code.to_lower().begins_with("ru") else "en"
+	return I18n.from_system(code)
 
 
 func apply_settings() -> void:
-	lang = lang_choice if lang_choice in LANGS else system_lang(OS.get_locale_language())
+	lang = lang_choice if lang_choice in LANGS else system_lang(OS.get_locale())
 	TranslationServer.set_locale(lang)
 	Engine.max_fps = 30 if eco_mode else 60
 	DisplayServer.screen_set_keep_on(keep_screen)
@@ -211,6 +215,7 @@ func make_theme() -> Theme:
 	if _theme != null:
 		return _theme
 	var base_font: FontFile = load("res://fonts/Rubik.ttf")
+	base_font.allow_system_fallback = true   # иероглифы, арабское письмо, деванагари — из шрифтов системы
 	var fv := FontVariation.new()
 	fv.base_font = base_font
 	fv.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("wght"): 500}

@@ -165,13 +165,16 @@ func _fill_settings() -> void:
 	settings_box.add_child(title)
 
 	# язык: «Как в системе» + кнопки с названиями языков на них самих
-	var langs := HBoxContainer.new()
-	langs.add_theme_constant_override("separation", 8)
+	var langs := GridContainer.new()
+	langs.columns = 3
+	langs.add_theme_constant_override("h_separation", 8)
+	langs.add_theme_constant_override("v_separation", 8)
 	for l in [""] + GameData.LANGS:
 		var b := Button.new()
 		b.text = tr("Как в системе") if l == "" else GameData.LANG_NAMES[l]
-		b.custom_minimum_size = Vector2(0, 54)
+		b.custom_minimum_size = Vector2(0, 52)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.clip_text = true
 		if l == GameData.lang_choice:
 			b.theme_type_variation = "AccentButton"
 		b.pressed.connect(_set_lang.bind(l))
