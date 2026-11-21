@@ -258,23 +258,27 @@ func test_fire() -> void:
 	check(g.balls.size() == 3, "выстрел без денег сработал")
 
 
-## Точка вылета: пустая открытая клетка — прямо там; квадрат рядом с пустотой — ближайшая пустая; туман вдали — нельзя.
+## Точка вылета — ровно точка нажатия в пустой открытой клетке; на квадрат или в туман — нельзя.
 func test_launch_from_press() -> void:
 	var g = await new_game(2)
 	var s: Vector2 = g.start_pos
 	var a = g._launch_from(s + Vector2(3, -4))
-	check(a != null and a.distance_to(s + Vector2(3, -4)) < 0.01, "в пустой клетке шар не вылетает из точки нажатия")
+	check(a != null and a.distance_to(s + Vector2(3, -4)) < 0.01, "в пустой клетке шар вылетает не из точки нажатия")
 	var brick := Vector2.ZERO
 	for y in range(g.ey0, g.ey1 + 1):
 		for x in range(g.ex0, g.ex1 + 1):
 			if g._vis_at(x, y) and g._kind_at(x, y) == 1:
 				brick = (Vector2(x, y) + Vector2(0.5, 0.5)) * 40.0
-	var b = g._launch_from(brick)
-	check(b != null, "нажатие на видимый квадрат у пустоты не нашло точку вылета")
-	if b != null:
-		var c := cell_of(b)
-		check(g._kind_at(c.x, c.y) == 0 and g._vis_at(c.x, c.y), "точка вылета не в пустой открытой клетке")
+	check(g._launch_from(brick) == null, "нажатие на квадрат разрешило выстрел (сдвигало точку)")
 	check(g._launch_from(s + Vector2(40.0 * 30, 0)) == null, "нажатие в далёкий туман разрешило выстрел")
+	# у стены/квадрата точка сдвигается не больше чем на радиус шара
+	for y in range(g.ey0, g.ey1 + 1):
+		for x in range(g.ex0, g.ex1 + 1):
+			if g._kind_at(x, y) == 0 and g._vis_at(x, y) and g._kind_at(x, y - 1) == 1:
+				var edge := Vector2(x * 40.0 + 20.0, y * 40.0 + 1.0)
+				var p = g._launch_from(edge)
+				check(p != null and p.distance_to(edge) <= 9.0, "у края клетки точка сдвинута слишком сильно")
+				return
 
 
 ## Центр поля доходит до края открытой части без увеличения.
@@ -354,18 +358,46 @@ func test_meadow_completes() -> void:
 	check(GameData.maps_unlocked >= 2, "следующая карта не открылась")
 
 
-## Сброс: раз в 30 с, возвращает шар в точку выстрела.
-func test_reset_cooldown() -> void:
+## «Сброс» включает режим: следующий выстрел рогаткой бесплатно перезапускает бездельника; кулдаун 30 с.
+func test_reset_relaunches_idler() -> void:
 	var g = await new_game(2)
+	g.rubles = 100000
+	g._fire(g.start_pos)
+	g._fire(g.start_pos + Vector2(5, 0))
 	sim(g, 3.0)
+	g.balls[0].earned = 100
+	g.balls[1].earned = 0
+	g.balls[2].earned = 50
+	var idler = g.balls[1]
+	var n0: int = g.balls.size()
+	var r0: int = g.rubles
 	g._reset_stuck()
-	var lp: Vector2 = g.last_launch
-	check(g.balls[0].pos.distance_to(lp) < 0.01, "шар не вернулся в место последнего выстрела")
-	check(g.reset_cd["basic"] > 29.0, "кулдаун сброса не запущен")
-	var p: Vector2 = g.balls[0].pos
-	sim(g, 1.0)
+	check(g.reset_armed, "«Сброс» не включил режим перезапуска")
+	g.cam.position = g.start_pos
+	g._clamp_cam()
+	var c: Vector2 = (g.start_pos - g.cam.position) * g.zoom + get_viewport().get_visible_rect().size * 0.5
+	g._sling_begin(c)
+	g._sling_move(c + Vector2(0, 100))
+	var from = g.sling_from
+	g._sling_release()
+	check(g.balls.size() == n0, "перезапуск купил новый шар")
+	check(g.rubles == r0, "перезапуск списал рубли")
+	check(from != null and idler.pos.distance_to(from) < 0.01, "перезапущен не бездельник или не из точки нажатия")
+	check(absf(rad_to_deg(idler.vel.angle()) + 90.0) < 0.5, "бездельник полетел не в направлении прицела")
+	check(not g.reset_armed and g.reset_cd["basic"] > 29.0, "после перезапуска не начался кулдаун")
 	g._reset_stuck()
-	check(g.balls[0].pos != lp or p != lp, "сброс сработал во время кулдауна")
+	check(not g.reset_armed, "во время кулдауна сброс включился")
+	# выключение повторным нажатием
+	g.reset_cd["basic"] = 0.0
+	g._reset_stuck()
+	g._reset_stuck()
+	check(not g.reset_armed, "повторное нажатие не выключило сброс")
+	# без денег рогатка не стреляет
+	g.rubles = 0
+	g._sling_begin(c)
+	g._sling_move(c + Vector2(0, 100))
+	g._sling_release()
+	check(g.balls.size() == n0, "без денег рогатка выстрелила")
 
 
 ## Огромная карта 10000×10000 загружается быстро и не создаёт лишних кусков.
@@ -445,7 +477,7 @@ func _cyrillic_texts(node: Node, out: Array) -> void:
 func test_russian_ui() -> void:
 	var g = await new_game(2)
 	check(tr("Прокачка") == "Прокачка", "в русском режиме перевод не русский: %s" % tr("Прокачка"))
-	check(g.btn_fire.text.begins_with("Выстрел"), "кнопка выстрела не на русском: %s" % g.btn_fire.text)
+	check(g.btn_reset.text.begins_with("Сброс"), "кнопка сброса не на русском: %s" % g.btn_reset.text)
 
 
 ## На английском в интерфейсе игры и меню нет русских букв.

@@ -74,6 +74,7 @@ var counts := {}
 var dmg_lvl := {}
 var spd_lvl := {}
 var reset_cd := {}
+var reset_armed := false        # «Сброс» включён: следующий выстрел перезапускает бездельника
 
 # ---- время
 var time_acc := 0.0
@@ -1312,26 +1313,26 @@ func _screen_center_world() -> Vector2:
 	return _screen_to_world(Vector2(vs.x * 0.5, (top_h + vs.y - bottom_h) * 0.5))
 
 
-## Точка вылета для нажатия в мировой точке w: сама точка, если клетка пустая и открытая,
-## иначе ближайшая пустая открытая клетка в радиусе 2. null — нажали не туда.
+## Точка вылета — ровно точка нажатия, если она в пустой открытой клетке; иначе null (нажали не туда).
+## Сдвиг только на несколько пикселей от соседних квадратов/стен, чтобы шар не появился внутри них.
 func _launch_from(w: Vector2):
 	var cx := int(floor(w.x * INV))
 	var cy := int(floor(w.y * INV))
-	if _vis_at(cx, cy) and _kind_at(cx, cy) == 0:
-		# держим шар внутри клетки, чтобы он не появлялся «в» соседнем квадрате
-		return w.clamp((Vector2(cx, cy) + Vector2(0.25, 0.25)) * CELL, (Vector2(cx, cy) + Vector2(0.75, 0.75)) * CELL)
-	var best = null
-	var bd := INF
-	for yy in range(cy - 2, cy + 3):
-		for xx in range(cx - 2, cx + 3):
-			if not _vis_at(xx, yy) or _kind_at(xx, yy) != 0:
-				continue
-			var p := (Vector2(xx, yy) + Vector2(0.5, 0.5)) * CELL
-			var d := p.distance_squared_to(w)
-			if d < bd:
-				bd = d
-				best = p
-	return best
+	if not _vis_at(cx, cy) or _kind_at(cx, cy) != 0:
+		return null
+	var r := 8.5
+	var lo := Vector2(cx, cy) * CELL
+	var hi := lo + Vector2(CELL, CELL)
+	var p := w
+	if _kind_at(cx - 1, cy) != 0:
+		p.x = maxf(p.x, lo.x + r)
+	if _kind_at(cx + 1, cy) != 0:
+		p.x = minf(p.x, hi.x - r)
+	if _kind_at(cx, cy - 1) != 0:
+		p.y = maxf(p.y, lo.y + r)
+	if _kind_at(cx, cy + 1) != 0:
+		p.y = minf(p.y, hi.y - r)
+	return p
 
 
 func _draw_overlay() -> void:
@@ -1346,7 +1347,11 @@ func _draw_overlay() -> void:
 		overlay.draw_circle(lp, 4.0 / zoom, col)
 		if pull >= SLING_MIN:
 			# стрелка направления: длина растёт с оттягиванием, при отмене — красная
-			var acol := Color(1, 0.4, 0.4, 0.9) if sling_cancel else Color(1.0, 0.85, 0.3, 0.95)
+			var acol := Color(1.0, 0.85, 0.3, 0.95)
+			if reset_armed:
+				acol = Color(0.45, 0.85, 1.0, 0.95)
+			if sling_cancel:
+				acol = Color(1, 0.4, 0.4, 0.9)
 			var alen := (90.0 + 180.0 * minf(pull, SLING_R) / SLING_R) / zoom
 			var tip: Vector2 = lp + dir * alen
 			var side := dir.orthogonal() * (14.0 / zoom)
@@ -1529,20 +1534,28 @@ func _sling_begin(p: Vector2) -> void:
 	sling_from = _launch_from(_screen_to_world(p))
 
 
+## Можно ли сейчас выстрелить: включён сброс или хватает денег на новый шар.
+func _can_shoot() -> bool:
+	return reset_armed or rubles >= _ball_cost(selected)
+
+
 func _sling_move(p: Vector2) -> void:
 	sling_pos = p
 	var pull := sling_start - p
-	sling_cancel = pull.length() > SLING_R or sling_from == null
+	sling_cancel = pull.length() > SLING_R or sling_from == null or not _can_shoot()
 	if pull.length() >= SLING_MIN and not sling_cancel:
 		aim_angle = _snap(rad_to_deg(pull.angle()))
 
 
 func _sling_release() -> void:
 	var pull := sling_start - sling_pos
-	var ok := not sling_cancel and sling_from != null and pull.length() >= SLING_MIN
+	var ok := not sling_cancel and sling_from != null and pull.length() >= SLING_MIN and _can_shoot()
 	sling = false
 	if ok:
-		_fire(sling_from)
+		if reset_armed:
+			_relaunch_idler(sling_from)
+		else:
+			_fire(sling_from)
 	else:
 		aim_angle = aim_before
 
@@ -1561,21 +1574,28 @@ func _draw_sling() -> void:
 	if not sling:
 		return
 	var pull := sling_start - sling_pos
-	var col := Color(1, 0.4, 0.4, 0.9) if sling_cancel or sling_from == null else Color(1, 1, 1, 0.85)
+	var bad := sling_cancel or sling_from == null or not _can_shoot()
+	var col := Color(1, 0.4, 0.4, 0.9) if bad else Color(1, 1, 1, 0.85)
 	# область наведения вокруг точки нажатия
 	sling_view.draw_circle(sling_start, SLING_R, Color(col.r, col.g, col.b, 0.06))
 	sling_view.draw_arc(sling_start, SLING_R, 0.0, TAU, 64, Color(col.r, col.g, col.b, 0.35), 2.0, true)
 	sling_view.draw_line(sling_start, sling_pos, Color(col.r, col.g, col.b, 0.6), 3.0, true)
 	sling_view.draw_circle(sling_start, 6.0, col)
 	sling_view.draw_circle(sling_pos, 10.0, Color(col.r, col.g, col.b, 0.5))
-	if pull.length() < SLING_MIN and sling_from != null:
+	if pull.length() < SLING_MIN and not bad:
 		return
 	var font: Font = GameData.font_bold
 	var txt := tr("Отпустите — отмена") if sling_cancel else tr("Отпустите — выстрел")
+	if not sling_cancel and reset_armed:
+		txt = tr("Отпустите — перезапуск бездельника")
 	if sling_from == null:
 		txt = tr("Нажмите на открытую клетку")
-	var tp := sling_start + Vector2(-150, -SLING_R - 16)
-	sling_view.draw_string(font, tp, txt, HORIZONTAL_ALIGNMENT_CENTER, 300, 20, col)
+	elif not _can_shoot():
+		txt = tr("Не хватает рублей")
+	var tw := minf(640.0, sling_view.size.x - 20.0)
+	var tp := Vector2(clampf(sling_start.x - tw * 0.5, 10.0, sling_view.size.x - tw - 10.0), sling_start.y - SLING_R - 16)
+	sling_view.draw_string(font, tp + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_CENTER, tw, 20, Color(0, 0, 0, 0.6))
+	sling_view.draw_string(font, tp, txt, HORIZONTAL_ALIGNMENT_CENTER, tw, 20, col)
 
 
 func _pinch_points() -> Array:
@@ -1618,7 +1638,7 @@ func _cycle_snap() -> void:
 
 # ================================================================ действия
 
-## Выстрел новым шаром выбранного типа. Без точки — из места последнего выстрела (кнопка «Выстрел»).
+## Выстрел новым шаром выбранного типа (рогаткой). Без точки — из места последнего выстрела (для тестов).
 func _fire(from = null) -> void:
 	var t := selected
 	var c := _ball_cost(t)
@@ -1656,23 +1676,38 @@ func _buy_spd(t: String) -> void:
 	_refresh_ui()
 
 
-## Раз в 30 с: шарик выбранного типа, заработавший меньше всех, возвращается в место последнего выстрела по прицелу.
+## «Сброс» — переключатель: следующий выстрел рогаткой бесплатно перезапускает шар выбранного типа,
+## заработавший меньше всех (бездельника). Кулдаун 30 с на тип начинается с этого выстрела.
 func _reset_stuck() -> void:
-	var t := selected
-	if reset_cd[t] > 0.0:
-		return
+	if reset_armed:
+		reset_armed = false
+	elif reset_cd[selected] <= 0.0 and int(counts[selected]) > 0:
+		reset_armed = true
+	_refresh_ui()
+
+
+func _idler(t: String):
 	var worst = null
 	for b in balls:
 		if b.type == t and (worst == null or b.earned < worst.earned):
 			worst = b
+	return worst
+
+
+func _relaunch_idler(p: Vector2) -> void:
+	var t := selected
+	var worst = _idler(t)
+	reset_armed = false
 	if worst == null:
 		return
-	worst.pos = last_launch
+	worst.pos = p
 	worst.vel = Vector2.from_angle(deg_to_rad(aim_angle)) * _speed(t)
+	worst.recent.clear()
 	for b in balls:
 		if b.type == t:
 			b.earned = 0
 	reset_cd[t] = RESET_CD
+	last_launch = p
 	_refresh_ui()
 
 
@@ -1709,6 +1744,8 @@ func _super_up(t: String) -> void:
 
 func _select(t: String) -> void:
 	selected = t
+	if reset_armed and (reset_cd[t] > 0.0 or int(counts[t]) == 0):
+		reset_armed = false
 	_refresh_ui()
 
 
@@ -1722,7 +1759,6 @@ func _to_menu() -> void:
 var ic_coin: ImageTexture
 var ic_gem: ImageTexture
 var prog_bar: ProgressBar
-var btn_fire: Button
 
 
 func _safe_margins() -> Array:
@@ -1868,18 +1904,13 @@ func _build_ui() -> void:
 	var br := HBoxContainer.new()
 	br.add_theme_constant_override("separation", 10)
 	bv.add_child(br)
-	btn_reset = _button("", "", 64, Icons.refresh(40))
-	btn_reset.custom_minimum_size.x = 120
+	btn_reset = _button("", "ChipButton", 64, Icons.refresh(40))
+	btn_reset.toggle_mode = true
+	btn_reset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn_reset.pressed.connect(_reset_stuck)
 	br.add_child(btn_reset)
-	btn_fire = _button("", "AccentButton", 64, ic_coin)
-	btn_fire.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn_fire.add_theme_font_size_override("font_size", 24)
-	btn_fire.pressed.connect(_fire)
-	br.add_child(btn_fire)
-	var bup := _button("", "", 64, Icons.arrow_up(40))
-	bup.custom_minimum_size.x = 150
-	bup.text = tr("Прокачка")
+	var bup := _button(tr("Прокачка"), "AccentButton", 64, Icons.arrow_up(40))
+	bup.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bup.pressed.connect(_show_upgrades.bind(true))
 	br.add_child(bup)
 	bottom_bar.resized.connect(_on_bars_resized)
@@ -2135,13 +2166,19 @@ func _refresh_ui() -> void:
 		lbl_prog.text = tr("%s из %s") % [GameData.fmt(destroyed), GameData.fmt(goal)]
 	btn_snap.text = [tr("любой"), tr("45°"), tr("90°")][snap_mode]
 	for t in chips:
-		chips[t].text = "×%d" % counts[t]
+		# цена следующего шара прямо на фишке; не хватает денег — фишка тусклее
+		var price := _ball_cost(t)
+		chips[t].text = "×%d · %s" % [counts[t], GameData.fmt(price)]
+		chips[t].modulate = Color(1, 1, 1, 1.0 if rubles >= price else 0.6)
 	var cd: float = reset_cd[selected]
-	btn_reset.text = tr("Сброс") if cd <= 0.0 else tr("%d с") % int(ceil(cd))
-	btn_reset.disabled = cd > 0.0 or int(counts[selected]) == 0
-	var fc := _ball_cost(selected)
-	btn_fire.text = tr("Выстрел · %s") % GameData.fmt(fc)
-	btn_fire.disabled = rubles < fc
+	if reset_armed:
+		btn_reset.text = tr("Сброс: прицельтесь")
+	elif cd > 0.0:
+		btn_reset.text = tr("Сброс · %d с") % int(ceil(cd))
+	else:
+		btn_reset.text = tr("Сброс")
+	btn_reset.set_pressed_no_signal(reset_armed)
+	btn_reset.disabled = not reset_armed and (cd > 0.0 or int(counts[selected]) == 0)
 
 	if not upg.visible:
 		return

@@ -126,7 +126,10 @@ func _run() -> void:
 	g.rubles = 5000
 	await _wait(0.2)
 	var n_before: int = g.balls.size()
-	var p := Vector2(vs.x * 0.5, vs.y * 0.5)
+	# нажимаем в открытую клетку у старта
+	g.cam.position = g.start_pos
+	g._clamp_cam()
+	var p: Vector2 = (g.start_pos - g.cam.position) * g.zoom + vs * 0.5
 	_touch(p, true)
 	await _wait(0.35)   # удержание — начинается прицел
 	check(g.sling, "удержание пальца включает прицел")
@@ -172,19 +175,10 @@ func _run() -> void:
 	check(g.zoom > z0 * 1.2, "щипок увеличивает масштаб")
 	check(is_equal_approx(g.aim_angle, a1), "щипок не сбивает прицел")
 
-	# выстрел с главного экрана из центра
-	g.rubles = 5000
-	await _wait(0.2)
-	var n0: int = g.balls.size()
-	var lp: Vector2 = g.last_launch
-	check(await _tap("Выстрел"), "кнопка «Выстрел» нажимается")
-	check(g.balls.size() == n0 + 1, "выстрел добавил шар")
-	if g.balls.size() == n0 + 1:
-		check(g.balls[-1].pos.distance_to(lp) < 40.0, "кнопка стреляет из места последнего выстрела")
-	g._select("splash")
-	await _wait(0.2)
-	await _tap("Выстрел")
-	check(int(g.counts["splash"]) == 1, "выстрел выбранным типом (бомба)")
+	# цена следующего шара на фишке
+	var chip: Button = g.chips["basic"]
+	check(chip.text.begins_with("×") and "·" in chip.text, "на фишке шара видна цена: %s" % chip.text)
+	check(_find(get_tree().root, "Выстрел") == null, "кнопки «Выстрел» больше нет")
 
 	# сдвиг карты двумя пальцами двигает точку выстрела
 	var c0: Vector2 = g.cam.position
@@ -209,12 +203,28 @@ func _run() -> void:
 	check(await _tap("Вернуться к игре"), "кнопка «Вернуться к игре»")
 	check(not g.upg.visible, "окно прокачки закрылось")
 
-	# сброс
+	# сброс: включить, выстрелить рогаткой — перезапускается бездельник, новый шар не покупается
 	g._select("basic")
 	await _wait(0.2)
 	check(await _tap("Сброс"), "кнопка «Сброс» нажимается")
-	check(g.reset_cd["basic"] > 25.0, "сброс запустил кулдаун")
-	await _wait(4.0)
+	check(g.reset_armed, "сброс включил режим перезапуска")
+	var n_reset: int = g.balls.size()
+	var r_reset: int = g.rubles
+	var pr := Vector2(vs.x * 0.5, vs.y * 0.5)
+	g.cam.position = g.start_pos
+	g._clamp_cam()
+	pr = (g.start_pos - g.cam.position) * g.zoom + vs * 0.5
+	_touch(pr, true)
+	await _wait(0.35)
+	for k in 5:
+		_drag(pr + Vector2(0, 25 * (k + 1)), Vector2(0, 25))
+		await get_tree().process_frame
+	await _shot("reset_aim")
+	_touch(pr + Vector2(0, 125), false)
+	await get_tree().process_frame
+	check(g.balls.size() == n_reset and g.rubles >= r_reset, "перезапуск бездельника без покупки")
+	check(not g.reset_armed and g.reset_cd["basic"] > 25.0, "после перезапуска начался кулдаун")
+	await _wait(3.0)
 	await _shot("game_later")
 
 	# меню и «Продолжить»

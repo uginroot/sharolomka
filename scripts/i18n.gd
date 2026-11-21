@@ -34,9 +34,7 @@ const EN := {
 	"Океан": "Ocean",
 	"Звёздная ночь": "Starry Night",
 	# --- игра
-	"Выстрел · %s": "Shoot · %s",
 	"Прокачка": "Upgrades",
-	"%d с": "%d s",
 	"любой": "any",
 	"45°": "45°",
 	"90°": "90°",
@@ -68,6 +66,10 @@ const EN := {
 	"Отпустите — выстрел": "Release to shoot",
 	"Отпустите — отмена": "Release to cancel",
 	"Нажмите на открытую клетку": "Press on an open cell",
+	"Отпустите — перезапуск бездельника": "Release to relaunch the idler",
+	"Не хватает рублей": "Not enough rubles",
+	"Сброс: прицельтесь": "Reset: take aim",
+	"Сброс · %d с": "Reset · %d s",
 	# --- шары
 	"Обычный": "Basic",
 	"Бомба": "Bomb",
