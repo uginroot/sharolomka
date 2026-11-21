@@ -23,6 +23,9 @@ const WALL_FACE := Color(0.9, 0.92, 0.96)
 const WALL_LIGHT := Color(1, 1, 1)
 const WALL_DARK := Color(0.6, 0.64, 0.74)
 const WALL_SEAM := Color(0.8, 0.83, 0.9)
+const GRID := Color(1, 1, 1, 0.055)
+const SLING_R := 230.0          # радиус области наведения рогатки, px экрана
+const SLING_MIN := 28.0         # меньше — это касание, а не оттягивание
 
 # ---- карта
 var map: Dictionary
@@ -105,6 +108,11 @@ var pinch_dist := 0.0
 var pinch_mid := Vector2.ZERO
 var mouse_pan := false
 var aim_before := 0.0
+var sling := false              # идёт оттягивание рогатки
+var sling_start := Vector2.ZERO # где нажали (экран)
+var sling_pos := Vector2.ZERO   # где палец сейчас (экран)
+var sling_cancel := false       # палец вытянут за область наведения
+var sling_view: Control
 
 # ---- интерфейс
 var ui_root: Control
@@ -703,6 +711,9 @@ func _process(delta: float) -> void:
 
 	_redraw_dirty()
 	overlay.queue_redraw()   # прицел привязан к центру экрана — он дешёвый, рисуем каждый кадр
+	if sling or sling_view.get_meta("was", false):
+		sling_view.queue_redraw()
+		sling_view.set_meta("was", sling)
 	ball_layer.queue_redraw()
 
 	if toast_t > 0.0:
@@ -1068,16 +1079,16 @@ func _check_goal() -> void:
 		GameData.maps_unlocked = maxi(GameData.maps_unlocked, map_index + 2)
 		GameData.save_game()
 		if not (track_all and alive <= 0):
-			_show_toast("Цель карты выполнена!\n+%d U, открыта следующая карта" % reward)
+			_show_toast(tr("Цель карты выполнена!\n+%d U, открыта следующая карта") % reward)
 	if track_all and alive <= 0 and not completed:
 		completed = true
 		GameData.map_states.erase(String(map["id"]))
 		DirAccess.remove_absolute(_save_path())
 		GameData.save_game()
 		var d := AcceptDialog.new()
-		d.title = "Победа!"
-		d.dialog_text = "Карта «%s» разбита полностью!" % map["name"]
-		d.ok_button_text = "В меню"
+		d.title = tr("Победа!")
+		d.dialog_text = tr("Карта «%s» разбита полностью!") % tr(map["name"])
+		d.ok_button_text = tr("В меню")
 		ui_root.add_child(d)
 		d.confirmed.connect(_to_menu)
 		d.canceled.connect(_to_menu)
@@ -1162,16 +1173,26 @@ func _draw_chunk(ck: int) -> void:
 	var kind: PackedByteArray = c.kind
 	var vis: PackedByteArray = c.vis
 	var hp: PackedInt32Array = c.hp
-	# пол и туман (туман рисуется полосами)
-	n.draw_rect(Rect2(0, 0, CPX, CPX), FLOOR)
-	for ly in CS:
+	# пол — полосами только под видимыми клетками; туман — это просто фон сцены
+	var gw := mini(CS, W - x0)
+	var gh := mini(CS, H - y0)
+	for ly in gh:
 		var run := -1
-		for lx in CS + 1:
-			var fog := lx < CS and (vis[(ly << 5) | lx] == 0 or kind[(ly << 5) | lx] == 3)
-			if fog and run < 0:
+		for lx in gw + 1:
+			var seen := lx < gw and vis[(ly << 5) | lx] == 1
+			if seen and run < 0:
 				run = lx
-			elif not fog and run >= 0:
-				n.draw_rect(Rect2(run * CELL, ly * CELL, (lx - run) * CELL, CELL), FOG)
+			elif not seen and run >= 0:
+				n.draw_rect(Rect2(run * CELL, ly * CELL, (lx - run) * CELL, CELL), FLOOR)
+				if lod == 0:
+					# еле видная сетка — только вблизи и только на открытом полу
+					var gl := PackedVector2Array()
+					for k in range(run, lx + 1):
+						gl.append(Vector2(k * CELL, ly * CELL))
+						gl.append(Vector2(k * CELL, ly * CELL + CELL))
+					gl.append(Vector2(run * CELL, ly * CELL))
+					gl.append(Vector2(lx * CELL, ly * CELL))
+					n.draw_multiline(gl, GRID)
 				run = -1
 	var detail := lod == 0
 	var gap := 1.0 if detail else 0.0
@@ -1295,11 +1316,23 @@ func _draw_overlay() -> void:
 		overlay.draw_line(c - Vector2(s, -s), c + Vector2(s, -s), Color(1, 0.35, 0.35, 0.9), w)
 	else:
 		var dir := Vector2.from_angle(deg_to_rad(aim_angle))
-		var len := 170.0 / zoom
-		var k := 0.0
-		while k < len:
-			overlay.draw_line(lp + dir * k, lp + dir * minf(k + len * 0.06, len), Color(1, 1, 1, 0.75), w)
-			k += len * 0.12
+		var pull := (sling_start - sling_pos).length()
+		if sling and pull >= SLING_MIN:
+			# стрелка направления: длина растёт с оттягиванием, при отмене — красная
+			var acol := Color(1, 0.4, 0.4, 0.9) if sling_cancel else Color(1.0, 0.85, 0.3, 0.95)
+			var alen := (90.0 + 180.0 * minf(pull, SLING_R) / SLING_R) / zoom
+			var tip: Vector2 = lp + dir * alen
+			var side := dir.orthogonal() * (14.0 / zoom)
+			overlay.draw_line(lp, tip - dir * (18.0 / zoom), Color(0, 0, 0, 0.5), 9.0 / zoom)
+			overlay.draw_line(lp, tip - dir * (18.0 / zoom), acol, 5.0 / zoom)
+			overlay.draw_colored_polygon(PackedVector2Array([tip, tip - dir * (26.0 / zoom) + side,
+				tip - dir * (26.0 / zoom) - side]), acol)
+		else:
+			var len := 170.0 / zoom
+			var k := 0.0
+			while k < len:
+				overlay.draw_line(lp + dir * k, lp + dir * minf(k + len * 0.06, len), Color(1, 1, 1, 0.75), w)
+				k += len * 0.12
 		var col: Color = colors[selected]
 		overlay.draw_arc(lp, 13.0 / zoom, 0.0, TAU, 32, Color(0, 0, 0, 0.6), 6.0 / zoom)
 		overlay.draw_arc(lp, 13.0 / zoom, 0.0, TAU, 32, col, 3.0 / zoom)
@@ -1372,6 +1405,8 @@ func _over_ui(p: Vector2) -> bool:
 	return top_bar.get_global_rect().has_point(p) or bottom_bar.get_global_rect().has_point(p)
 
 
+## Рогатка: нажать на карту и оттянуть назад — шар полетит в противоположную сторону.
+## Палец за пределами области наведения — отмена. Два пальца — масштаб и сдвиг карты.
 func _unhandled_input(e: InputEvent) -> void:
 	if e is InputEventScreenTouch:
 		if e.pressed:
@@ -1379,16 +1414,14 @@ func _unhandled_input(e: InputEvent) -> void:
 				return
 			touches[e.index] = e.position
 			if touches.size() == 1 and not pinch:
-				aim_before = aim_angle
-				_aim_at(e.position)
+				_sling_begin(e.position)
 			elif touches.size() >= 2:
-				if not pinch:
-					# второй палец — это щипок, а не прицел: возвращаем прицел как был
-					aim_angle = aim_before
-					overlay_dirty = true
+				_sling_abort()
 				pinch = true
 				_pinch_reset()
 		else:
+			if touches.has(e.index) and touches.size() == 1 and sling:
+				_sling_release()
 			touches.erase(e.index)
 			if touches.size() >= 2:
 				_pinch_reset()
@@ -1400,25 +1433,79 @@ func _unhandled_input(e: InputEvent) -> void:
 		touches[e.index] = e.position
 		if pinch and touches.size() >= 2:
 			_pinch_update()
-		elif not pinch:
-			_aim_at(e.position)
+		elif sling:
+			_sling_move(e.position)
 	elif e is InputEventMouseButton and e.device != InputEvent.DEVICE_ID_EMULATION:
-		if _over_ui(e.position):
+		if e.pressed and _over_ui(e.position):
 			return
 		if e.pressed and e.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_set_zoom(zoom * 1.15, e.position)
 		elif e.pressed and e.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_set_zoom(zoom / 1.15, e.position)
-		elif e.button_index == MOUSE_BUTTON_LEFT and e.pressed:
-			_aim_at(e.position)
+		elif e.button_index == MOUSE_BUTTON_LEFT:
+			if e.pressed:
+				_sling_begin(e.position)
+			elif sling:
+				_sling_release()
 		elif e.button_index == MOUSE_BUTTON_RIGHT or e.button_index == MOUSE_BUTTON_MIDDLE:
 			mouse_pan = e.pressed
 	elif e is InputEventMouseMotion and e.device != InputEvent.DEVICE_ID_EMULATION:
 		if mouse_pan:
 			cam.position -= e.relative / zoom
 			_clamp_cam()
-		elif e.button_mask & MOUSE_BUTTON_MASK_LEFT and not _over_ui(e.position):
-			_aim_at(e.position)
+		elif sling:
+			_sling_move(e.position)
+
+
+func _sling_begin(p: Vector2) -> void:
+	sling = true
+	sling_start = p
+	sling_pos = p
+	sling_cancel = false
+	aim_before = aim_angle
+
+
+func _sling_move(p: Vector2) -> void:
+	sling_pos = p
+	var pull := sling_start - p
+	sling_cancel = pull.length() > SLING_R
+	if pull.length() >= SLING_MIN and not sling_cancel:
+		aim_angle = _snap(rad_to_deg(pull.angle()))
+
+
+func _sling_release() -> void:
+	var pull := sling_start - sling_pos
+	var ok := not sling_cancel and pull.length() >= SLING_MIN
+	sling = false
+	if ok:
+		_fire()
+	else:
+		aim_angle = aim_before
+
+
+func _sling_abort() -> void:
+	if sling:
+		sling = false
+		aim_angle = aim_before
+
+
+func _draw_sling() -> void:
+	if not sling:
+		return
+	var pull := sling_start - sling_pos
+	var col := Color(1, 0.4, 0.4, 0.9) if sling_cancel else Color(1, 1, 1, 0.85)
+	# область наведения вокруг точки нажатия
+	sling_view.draw_circle(sling_start, SLING_R, Color(col.r, col.g, col.b, 0.06))
+	sling_view.draw_arc(sling_start, SLING_R, 0.0, TAU, 64, Color(col.r, col.g, col.b, 0.35), 2.0, true)
+	sling_view.draw_line(sling_start, sling_pos, Color(col.r, col.g, col.b, 0.6), 3.0, true)
+	sling_view.draw_circle(sling_start, 6.0, col)
+	sling_view.draw_circle(sling_pos, 10.0, Color(col.r, col.g, col.b, 0.5))
+	if pull.length() < SLING_MIN:
+		return
+	var font: Font = GameData.font_bold
+	var txt := tr("Отпустите — отмена") if sling_cancel else tr("Отпустите — выстрел")
+	var tp := sling_start + Vector2(-150, -SLING_R - 16)
+	sling_view.draw_string(font, tp, txt, HORIZONTAL_ALIGNMENT_CENTER, 300, 20, col)
 
 
 func _pinch_points() -> Array:
@@ -1441,16 +1528,6 @@ func _pinch_update() -> void:
 	_clamp_cam()
 	pinch_dist = dist
 	pinch_mid = mid
-
-
-func _aim_at(sp: Vector2) -> void:
-	var lp = _launch_point()
-	var origin: Vector2 = lp if lp != null else _screen_center_world()
-	var d := _screen_to_world(sp) - origin
-	if d.length() < 12.0:
-		return
-	aim_angle = _snap(rad_to_deg(d.angle()))
-	overlay_dirty = true
 
 
 func _snap(a: float) -> float:
@@ -1658,6 +1735,11 @@ func _build_ui() -> void:
 	ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui_root.theme = GameData.make_theme()   # CanvasLayer не передаёт тему от окна — задаём явно
 	cl.add_child(ui_root)
+	sling_view = Control.new()
+	sling_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	sling_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sling_view.draw.connect(_draw_sling)
+	ui_root.add_child(sling_view)
 
 	# --- верхняя полоса
 	top_bar = PanelContainer.new()
@@ -1727,7 +1809,7 @@ func _build_ui() -> void:
 	br.add_child(btn_fire)
 	var bup := _button("", "", 64, Icons.arrow_up(40))
 	bup.custom_minimum_size.x = 150
-	bup.text = "Прокачка"
+	bup.text = tr("Прокачка")
 	bup.pressed.connect(_show_upgrades.bind(true))
 	br.add_child(bup)
 	bottom_bar.resized.connect(_on_bars_resized)
@@ -1762,7 +1844,7 @@ func _build_ui() -> void:
 	var uh := HBoxContainer.new()
 	uh.add_theme_constant_override("separation", 8)
 	uv.add_child(uh)
-	var ut := _label("Прокачка", "Title")
+	var ut := _label(tr("Прокачка"), "Title")
 	ut.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	uh.add_child(ut)
 	upg_rub = _pill(ic_coin, GameData.C_GOLD)
@@ -1788,9 +1870,9 @@ func _build_ui() -> void:
 			shop_box = vb
 		else:
 			perk_box = vb
-	tabs.set_tab_title(0, "  Шарики  ")
-	tabs.set_tab_title(1, "  Перки  ")
-	var bclose := _button("Вернуться к игре", "AccentButton", 60)
+	tabs.set_tab_title(0, tr("  Шарики  "))
+	tabs.set_tab_title(1, tr("  Перки  "))
+	var bclose := _button(tr("Вернуться к игре"), "AccentButton", 60)
 	bclose.pressed.connect(_show_upgrades.bind(false))
 	uv.add_child(bclose)
 
@@ -1838,6 +1920,7 @@ func _show_upgrades(show: bool) -> void:
 	upg.visible = show
 	touches.clear()
 	pinch = false
+	_sling_abort()
 	_refresh_ui()
 
 
@@ -1869,7 +1952,7 @@ func _card_head(parent: VBoxContainer, t: String, locked: bool) -> Label:
 	h.add_theme_constant_override("separation", 10)
 	parent.add_child(h)
 	h.add_child(_icon_rect(Icons.dot(def["color"], 44) if not locked else Icons.lock(40), 32))
-	var n := _label(def["name"], "Title")
+	var n := _label(tr(def["name"]), "Title")
 	h.add_child(n)
 	var extra := _label("", "Muted")
 	extra.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1912,7 +1995,7 @@ func _rebuild_rows() -> void:
 		cv.add_theme_constant_override("separation", 10)
 		card.add_child(cv)
 		var extra := _card_head(cv, t, not unlocked)
-		var sd := _label(def["desc"], "Muted")
+		var sd := _label(tr(def["desc"]), "Muted")
 		sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		cv.add_child(sd)
 		if unlocked:
@@ -1921,12 +2004,12 @@ func _rebuild_rows() -> void:
 			cv.add_child(row)
 			shop_refs[t] = {
 				"extra": extra,
-				"dmg": _price_btn(row, "Урон", ic_coin, _buy_dmg.bind(t)),
-				"spd": _price_btn(row, "Скорость", ic_coin, _buy_spd.bind(t)),
+				"dmg": _price_btn(row, tr("Урон"), ic_coin, _buy_dmg.bind(t)),
+				"spd": _price_btn(row, tr("Скорость"), ic_coin, _buy_spd.bind(t)),
 			}
 		else:
 			card.modulate = Color(1, 1, 1, 0.6)
-			extra.text = "открывается во вкладке «Перки»"
+			extra.text = tr("открывается во вкладке «Перки»")
 
 		# --- карточка перков
 		var pc := PanelContainer.new()
@@ -1936,13 +2019,13 @@ func _rebuild_rows() -> void:
 		pv.add_theme_constant_override("separation", 8)
 		pc.add_child(pv)
 		_card_head(pv, t, not unlocked)
-		var d0 := _label(def["desc"], "Muted")
+		var d0 := _label(tr(def["desc"]), "Muted")
 		d0.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		pv.add_child(d0)
-		var d1 := _label("«%s» — %s" % [def["perk"], def["perk_desc"]], "Muted")
+		var d1 := _label(tr("«%s» — %s") % [tr(def["perk"]), tr(def["perk_desc"])], "Muted")
 		d1.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		pv.add_child(d1)
-		var d2 := _label("Супер «%s» — %s" % [def["super"], def["super_desc"]], "Muted")
+		var d2 := _label(tr("Супер «%s» — %s") % [tr(def["super"]), tr(def["super_desc"])], "Muted")
 		d2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		pv.add_child(d2)
 		var prow := HBoxContainer.new()
@@ -1975,19 +2058,19 @@ func _refresh_ui() -> void:
 	var frac := float(destroyed) / maxf(1.0, float(goal))
 	prog_bar.value = minf(1.0, frac)
 	if track_all:
-		lbl_prog.text = "Разбито %d%%" % int(100.0 * frac)
+		lbl_prog.text = tr("Разбито %d%%") % int(100.0 * frac)
 	elif goal_done:
-		lbl_prog.text = "Разбито %s" % GameData.fmt(destroyed)
+		lbl_prog.text = tr("Разбито %s") % GameData.fmt(destroyed)
 	else:
-		lbl_prog.text = "%s из %s" % [GameData.fmt(destroyed), GameData.fmt(goal)]
-	btn_snap.text = ["любой", "45°", "90°"][snap_mode]
+		lbl_prog.text = tr("%s из %s") % [GameData.fmt(destroyed), GameData.fmt(goal)]
+	btn_snap.text = [tr("любой"), tr("45°"), tr("90°")][snap_mode]
 	for t in chips:
 		chips[t].text = "×%d" % counts[t]
 	var cd: float = reset_cd[selected]
-	btn_reset.text = "Сброс" if cd <= 0.0 else "%d с" % int(ceil(cd))
+	btn_reset.text = tr("Сброс") if cd <= 0.0 else tr("%d с") % int(ceil(cd))
 	btn_reset.disabled = cd > 0.0 or int(counts[selected]) == 0
 	var fc := _ball_cost(selected)
-	btn_fire.text = "Выстрел · %s" % GameData.fmt(fc)
+	btn_fire.text = tr("Выстрел · %s") % GameData.fmt(fc)
 	btn_fire.disabled = rubles < fc or _launch_point() == null
 
 	if not upg.visible:
@@ -1996,22 +2079,22 @@ func _refresh_ui() -> void:
 	upg_u.text = str(GameData.u)
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
-		r["extra"].text = "шаров на карте: %d" % counts[t]
+		r["extra"].text = tr("шаров на карте: %d") % counts[t]
 		var dc := _dmg_cost(t)
-		r["dmg"]["label"].text = "Урон %d → %d" % [_damage_of(t), _damage_of_next(t)]
+		r["dmg"]["label"].text = tr("Урон %d → %d") % [_damage_of(t), _damage_of_next(t)]
 		r["dmg"]["button"].text = GameData.fmt(dc)
 		r["dmg"]["button"].disabled = rubles < dc
 		var sl := int(spd_lvl[t])
 		var cps := _speed(t) / CELL
 		if sl >= SPD_MAX:
-			r["spd"]["label"].text = "Скорость %.1f кл/с" % cps
+			r["spd"]["label"].text = tr("Скорость %.1f кл/с") % cps
 		else:
 			spd_lvl[t] += 1
 			var nxt := _speed(t) / CELL
 			spd_lvl[t] -= 1
-			r["spd"]["label"].text = "Скорость %.1f → %.1f кл/с" % [cps, nxt]
+			r["spd"]["label"].text = tr("Скорость %.1f → %.1f кл/с") % [cps, nxt]
 		if sl >= SPD_MAX:
-			r["spd"]["button"].text = "макс."
+			r["spd"]["button"].text = tr("макс.")
 			r["spd"]["button"].disabled = true
 		else:
 			var scost := _spd_cost(t)
@@ -2022,19 +2105,19 @@ func _refresh_ui() -> void:
 		var r: Dictionary = perk_refs[t]
 		if r.has("unlock"):
 			var uc := int(GameData.TYPES[t]["unlock_u"])
-			r["unlock"].text = "Открыть · %d" % uc
+			r["unlock"].text = tr("Открыть · %d") % uc
 			r["unlock"].disabled = GameData.u < uc
 			continue
 		var lvl := int(GameData.perks[t])
 		if lvl >= GameData.PERK_MAX:
-			r["perk"].text = "Перк %d/%d" % [lvl, GameData.PERK_MAX]
+			r["perk"].text = tr("Перк %d/%d") % [lvl, GameData.PERK_MAX]
 			r["perk"].disabled = true
 		else:
-			r["perk"].text = "Перк %d/%d · %d" % [lvl, GameData.PERK_MAX, lvl + 1]
+			r["perk"].text = tr("Перк %d/%d · %d") % [lvl, GameData.PERK_MAX, lvl + 1]
 			r["perk"].disabled = GameData.u < lvl + 1
 		if GameData.supers[t]:
-			r["super"].text = "Супер есть"
+			r["super"].text = tr("Супер есть")
 			r["super"].disabled = true
 		else:
-			r["super"].text = "Супер · %d" % GameData.SUPER_COST
+			r["super"].text = tr("Супер · %d") % GameData.SUPER_COST
 			r["super"].disabled = GameData.u < GameData.SUPER_COST

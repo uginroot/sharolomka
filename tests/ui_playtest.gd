@@ -19,6 +19,8 @@ func _ready() -> void:
 func _start() -> void:
 	reparent(get_tree().root)
 	GameData.reset_all()
+	GameData.lang = "ru"
+	GameData.apply_settings()
 	GameData.unlocked["splash"] = true
 	GameData.u = 7
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
@@ -119,17 +121,33 @@ func _run() -> void:
 	await _wait(2.0)
 	await _shot("game_start")
 
-	# прицел одним пальцем
+	# рогатка: нажать и оттянуть вниз — шар летит вверх
 	var vs := get_viewport().get_visible_rect().size
-	var a0: float = g.aim_angle
-	var p := Vector2(vs.x * 0.2, vs.y * 0.45)
+	g.rubles = 5000
+	await _wait(0.2)
+	var n_before: int = g.balls.size()
+	var p := Vector2(vs.x * 0.5, vs.y * 0.5)
 	_touch(p, true)
 	await get_tree().process_frame
-	_drag(p + Vector2(40, -20), Vector2(40, -20))
+	for k in 6:
+		_drag(p + Vector2(0, 25 * (k + 1)), Vector2(0, 25))
+		await get_tree().process_frame
+	await _shot("sling_aim")
+	_touch(p + Vector2(0, 150), false)
 	await get_tree().process_frame
-	_touch(p + Vector2(40, -20), false)
+	check(g.balls.size() == n_before + 1, "рогатка: оттянуть и отпустить — выстрел")
+	check(absf(g.aim_angle + 90.0) < 1.0, "рогатка: оттянули вниз — летит вверх")
+	# отмена: вытянуть за область наведения
+	_touch(p, true)
 	await get_tree().process_frame
-	check(absf(g.aim_angle - a0) > 1.0, "палец меняет направление выстрела")
+	for k in 8:
+		_drag(p + Vector2(40 * (k + 1), 0), Vector2(40, 0))
+		await get_tree().process_frame
+	await _shot("sling_cancel")
+	_touch(p + Vector2(320, 0), false)
+	await get_tree().process_frame
+	check(g.balls.size() == n_before + 1, "рогатка: за областью наведения — отмена")
+	var a0: float = g.aim_angle
 
 	# щипок не сбивает прицел и меняет масштаб
 	var a1: float = g.aim_angle
@@ -196,3 +214,28 @@ func _run() -> void:
 	check(g2.name == "Game" and g2.destroyed >= destroyed, "игра продолжилась с сохранённым прогрессом")
 	check(g2.field_root.get_child_count() > 0, "открытая часть карты рисуется после загрузки")
 	await _shot("continued")
+
+	# английский язык через экран настроек
+	var menu_btn2: Button = g2.top_bar.find_children("*", "Button", true, false)[0]
+	await _tap_at(menu_btn2.get_global_rect().get_center())
+	await _wait(1.0)
+	check(await _tap("Настройки"), "в меню есть «Настройки»")
+	await _wait(0.3)
+	check(await _tap("English"), "в настройках можно выбрать English")
+	await _wait(1.0)
+	check(GameData.lang == "en", "язык переключился на английский")
+	await _shot("settings_en")
+	check(await _tap("Back"), "кнопка Back в настройках")
+	await _wait(0.3)
+	await _shot("menu_en")
+	check(await _tap("Continue"), "в английском меню есть Continue")
+	await _wait(1.5)
+	var g3 = get_tree().current_scene
+	g3.rubles = 50000
+	await _wait(0.3)
+	await _shot("game_en")
+	await _tap("Upgrades")
+	await _wait(0.4)
+	await _shot("upgrades_en")
+	GameData.lang = "ru"
+	GameData.apply_settings()

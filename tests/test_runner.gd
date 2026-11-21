@@ -51,6 +51,8 @@ func check(cond: bool, msg: String) -> void:
 func new_game(map_index: int, setup: Callable = Callable()):
 	_free_game()
 	GameData.reset_all()
+	GameData.lang = "ru"
+	GameData.apply_settings()
 	GameData.current_map = map_index
 	if setup.is_valid():
 		setup.call()
@@ -377,3 +379,115 @@ func test_performance_budget() -> void:
 	var per_frame := (Time.get_ticks_usec() - t0) / (5.0 / DT) / 1000.0
 	print("    шаров %d, %.2f мс на кадр симуляции" % [g.balls.size(), per_frame])
 	check(per_frame < 4.0, "симуляция %.2f мс на кадр — слишком медленно" % per_frame)
+
+
+## У каждой строки в tr("...") есть английский перевод с теми же плейсхолдерами.
+func test_translations_complete() -> void:
+	var en: Dictionary = preload("res://scripts/i18n.gd").EN
+	var re := RegEx.new()
+	re.compile('tr\\("((?:[^"\\\\]|\\\\.)*)"\\)')
+	var ph := RegEx.new()
+	ph.compile("%[-0-9.]*[dsf%]")
+	var keys := {}
+	for f in DirAccess.get_files_at("res://scripts"):
+		if not f.ends_with(".gd") or f == "i18n.gd":
+			continue
+		var src := FileAccess.get_file_as_string("res://scripts/" + f)
+		for m in re.search_all(src):
+			keys[m.get_string(1).replace("\\n", "\n").replace('\\"', '"')] = f
+	# названия и описания шаров и карт тоже переводятся
+	for t in GameData.TYPE_ORDER:
+		for k in ["name", "desc", "perk", "perk_desc", "super", "super_desc"]:
+			keys[GameData.TYPES[t][k]] = "game_data.gd"
+	for mp in preload("res://scripts/maps.gd").get_maps():
+		keys[mp["name"]] = "maps.gd"
+	var missing := 0
+	for k in keys:
+		if not en.has(k):
+			missing += 1
+			check(false, "нет перевода (%s): %s" % [keys[k], k])
+			continue
+		var a := ph.search_all(k).map(func(m): return m.get_string())
+		var b := ph.search_all(en[k]).map(func(m): return m.get_string())
+		check(a == b, "плейсхолдеры не совпадают: «%s» → «%s»" % [k, en[k]])
+	print("    строк для перевода: %d" % keys.size())
+
+
+func _cyrillic_texts(node: Node, out: Array) -> void:
+	var cyr := RegEx.new()
+	cyr.compile("[А-Яа-яЁё]")
+	var txt := ""
+	if node is Label or node is Button:
+		txt = node.text
+	if node is TabContainer:
+		for i in node.get_tab_count():
+			txt += node.get_tab_title(i)
+	if txt != "" and cyr.search(txt) != null and not (txt in GameData.LANG_NAMES.values()):
+		out.append(txt)
+	for c in node.get_children():
+		_cyrillic_texts(c, out)
+
+
+## В русском режиме интерфейс русский (у Godot запасной язык по умолчанию английский — ловим это).
+func test_russian_ui() -> void:
+	var g = await new_game(2)
+	check(tr("Прокачка") == "Прокачка", "в русском режиме перевод не русский: %s" % tr("Прокачка"))
+	check(g.btn_fire.text.begins_with("Выстрел"), "кнопка выстрела не на русском: %s" % g.btn_fire.text)
+
+
+## На английском в интерфейсе игры и меню нет русских букв.
+func test_english_ui() -> void:
+	var g = await new_game(2, func():
+		unlock_all(2, true)
+		GameData.lang = "en"
+		GameData.apply_settings())
+	g.rubles = 100000
+	g._show_upgrades(true)
+	g._refresh_ui()
+	var bad := []
+	_cyrillic_texts(g.ui_root, bad)
+	check(bad.is_empty(), "русский текст в английской игре: %s" % str(bad))
+	var menu = load("res://scenes/main_menu.tscn").instantiate()
+	add_child(menu)
+	await get_tree().process_frame
+	menu._show_settings(true)
+	await get_tree().process_frame
+	var bad2 := []
+	_cyrillic_texts(menu, bad2)
+	menu._show_settings(false)
+	await get_tree().process_frame
+	_cyrillic_texts(menu, bad2)
+	check(bad2.is_empty(), "русский текст в английском меню: %s" % str(bad2))
+	menu.queue_free()
+	GameData.lang = "ru"
+	GameData.apply_settings()
+
+
+## Рогатка: оттягивание назад стреляет вперёд, вытягивание за область — отмена, касание — ничего.
+func test_slingshot() -> void:
+	var g = await new_game(2)
+	g.rubles = 100000
+	var c := Vector2(360, 700)
+	var n0: int = g.balls.size()
+	g._sling_begin(c)
+	g._sling_move(c + Vector2(0, 120))      # тянем вниз
+	check(absf(g.aim_angle - (-90.0)) < 0.5, "оттянули вниз — направление вверх, а не %.1f" % g.aim_angle)
+	g._sling_release()
+	check(g.balls.size() == n0 + 1, "отпускание после оттягивания стреляет")
+	var a: float = g.aim_angle
+	g._sling_begin(c)
+	g._sling_move(c + Vector2(100, 0))
+	g._sling_move(c + Vector2(400, 0))      # за пределами области наведения
+	check(g.sling_cancel, "вытянули за область — режим отмены")
+	g._sling_release()
+	check(g.balls.size() == n0 + 1, "отмена не стреляет")
+	check(is_equal_approx(g.aim_angle, a), "отмена возвращает прежнее направление")
+	g._sling_begin(c)
+	g._sling_move(c + Vector2(5, 5))        # просто касание
+	g._sling_release()
+	check(g.balls.size() == n0 + 1, "короткое касание не стреляет")
+	g.snap_mode = 2
+	g._sling_begin(c)
+	g._sling_move(c + Vector2(-100, 30))
+	check(is_equal_approx(fposmod(g.aim_angle, 90.0), 0.0), "режим 90° округляет направление")
+	g._sling_abort()

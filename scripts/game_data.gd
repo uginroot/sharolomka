@@ -2,6 +2,9 @@ extends Node
 ## Глобальные данные: типы шариков, U-баллы, перки, открытые карты, сохранения.
 
 const SAVE_PATH := "user://save.json"
+const I18n = preload("res://scripts/i18n.gd")
+const LANGS := ["ru", "en"]
+const LANG_NAMES := {"ru": "Русский", "en": "English"}
 const PERK_MAX := 5
 const SUPER_COST := 15
 const TYPE_ORDER := ["basic", "splash", "sniper", "pierce", "poison"]
@@ -59,16 +62,25 @@ var map_states := {}
 var current_map := 0
 var eco_mode := false       # 30 FPS вместо 60
 var keep_screen := false    # не гасить экран во время игры
+var lang := ""              # язык интерфейса; пусто — по языку системы
 
 
 func _ready() -> void:
+	var tr_en := Translation.new()
+	tr_en.locale = "en"
+	for k in I18n.EN:
+		tr_en.add_message(k, I18n.EN[k])
+	TranslationServer.add_translation(tr_en)
 	_reset_defaults()
 	load_game()
+	if lang == "":
+		lang = "ru" if OS.get_locale_language() == "ru" else "en"
 	apply_settings()
 	get_tree().root.theme = make_theme()   # тема на всё приложение, включая диалоги
 
 
 func apply_settings() -> void:
+	TranslationServer.set_locale(lang)
 	Engine.max_fps = 30 if eco_mode else 60
 	DisplayServer.screen_set_keep_on(keep_screen)
 
@@ -91,7 +103,7 @@ func save_game() -> void:
 	var data := {
 		"u": u, "unlocked": unlocked, "perks": perks, "supers": supers,
 		"maps_unlocked": maps_unlocked, "maps_done": maps_done, "map_states": map_states,
-		"eco_mode": eco_mode, "keep_screen": keep_screen,
+		"eco_mode": eco_mode, "keep_screen": keep_screen, "lang": lang,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
@@ -120,11 +132,13 @@ func load_game() -> void:
 	map_states = data.get("map_states", {})
 	eco_mode = bool(data.get("eco_mode", false))
 	keep_screen = bool(data.get("keep_screen", false))
+	lang = String(data.get("lang", ""))
 
 
 func reset_all() -> void:
 	var e := eco_mode
 	var k := keep_screen
+	var l := lang
 	_reset_defaults()
 	var dir := DirAccess.open("user://")
 	if dir:
@@ -133,6 +147,7 @@ func reset_all() -> void:
 				dir.remove(f)
 	eco_mode = e
 	keep_screen = k
+	lang = l
 	save_game()
 
 
