@@ -13,6 +13,7 @@ const EN := {
 	" · цель выполнена": " · goal reached",
 	"Настройки": "Settings",
 	"Язык": "Language",
+	"Как в системе": "System",
 	"Экономия батареи": "Battery saver",
 	"30 кадров в секунду вместо 60": "30 frames per second instead of 60",
 	"Не гасить экран": "Keep screen on",

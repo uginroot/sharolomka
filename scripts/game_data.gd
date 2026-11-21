@@ -62,7 +62,8 @@ var map_states := {}
 var current_map := 0
 var eco_mode := false       # 30 FPS вместо 60
 var keep_screen := false    # не гасить экран во время игры
-var lang := ""              # язык интерфейса; пусто — по языку системы
+var lang := "ru"            # действующий язык интерфейса
+var lang_choice := ""       # выбор игрока; пусто — как в системе (русский, если система на русском, иначе английский)
 
 
 func _ready() -> void:
@@ -73,13 +74,17 @@ func _ready() -> void:
 	TranslationServer.add_translation(tr_en)
 	_reset_defaults()
 	load_game()
-	if lang == "":
-		lang = "ru" if OS.get_locale_language() == "ru" else "en"
 	apply_settings()
 	get_tree().root.theme = make_theme()   # тема на всё приложение, включая диалоги
 
 
+## Язык системы → язык игры: русский только для русской системы, для всех остальных — английский.
+static func system_lang(code: String) -> String:
+	return "ru" if code.to_lower().begins_with("ru") else "en"
+
+
 func apply_settings() -> void:
+	lang = lang_choice if lang_choice in LANGS else system_lang(OS.get_locale_language())
 	TranslationServer.set_locale(lang)
 	Engine.max_fps = 30 if eco_mode else 60
 	DisplayServer.screen_set_keep_on(keep_screen)
@@ -103,7 +108,7 @@ func save_game() -> void:
 	var data := {
 		"u": u, "unlocked": unlocked, "perks": perks, "supers": supers,
 		"maps_unlocked": maps_unlocked, "maps_done": maps_done, "map_states": map_states,
-		"eco_mode": eco_mode, "keep_screen": keep_screen, "lang": lang,
+		"eco_mode": eco_mode, "keep_screen": keep_screen, "lang_choice": lang_choice,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
@@ -132,13 +137,14 @@ func load_game() -> void:
 	map_states = data.get("map_states", {})
 	eco_mode = bool(data.get("eco_mode", false))
 	keep_screen = bool(data.get("keep_screen", false))
-	lang = String(data.get("lang", ""))
+	# старый ключ "lang" записывался автоматически — не считаем его выбором игрока
+	lang_choice = String(data.get("lang_choice", ""))
 
 
 func reset_all() -> void:
 	var e := eco_mode
 	var k := keep_screen
-	var l := lang
+	var l := lang_choice
 	_reset_defaults()
 	var dir := DirAccess.open("user://")
 	if dir:
@@ -147,7 +153,7 @@ func reset_all() -> void:
 				dir.remove(f)
 	eco_mode = e
 	keep_screen = k
-	lang = l
+	lang_choice = l
 	save_game()
 
 

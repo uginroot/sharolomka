@@ -51,7 +51,7 @@ func check(cond: bool, msg: String) -> void:
 func new_game(map_index: int, setup: Callable = Callable()):
 	_free_game()
 	GameData.reset_all()
-	GameData.lang = "ru"
+	GameData.lang_choice = "ru"
 	GameData.apply_settings()
 	GameData.current_map = map_index
 	if setup.is_valid():
@@ -484,7 +484,7 @@ func test_russian_ui() -> void:
 func test_english_ui() -> void:
 	var g = await new_game(2, func():
 		unlock_all(2, true)
-		GameData.lang = "en"
+		GameData.lang_choice = "en"
 		GameData.apply_settings())
 	g.rubles = 100000
 	g._show_upgrades(true)
@@ -504,7 +504,7 @@ func test_english_ui() -> void:
 	_cyrillic_texts(menu, bad2)
 	check(bad2.is_empty(), "русский текст в английском меню: %s" % str(bad2))
 	menu.queue_free()
-	GameData.lang = "ru"
+	GameData.lang_choice = "ru"
 	GameData.apply_settings()
 
 
@@ -587,3 +587,26 @@ func test_gesture_hold_vs_pan() -> void:
 	g._press_up()
 	g._hold_tick(0.5)
 	check(not g.sling and g.balls.size() == 1, "короткое касание что-то сделало")
+
+
+## Язык по умолчанию — язык системы: русский для русской системы, для любой другой — английский.
+func test_default_language() -> void:
+	for pair in [["ru", "ru"], ["ru_RU", "ru"], ["en", "en"], ["en_US", "en"], ["de", "en"], ["uk", "en"], ["kk", "en"], ["zh_CN", "en"]]:
+		check(GameData.system_lang(pair[0]) == pair[1], "система %s → %s, а не %s" % [pair[0], GameData.system_lang(pair[0]), pair[1]])
+	var keep: String = GameData.lang_choice
+	GameData.lang_choice = ""
+	GameData.apply_settings()
+	check(GameData.lang == GameData.system_lang(OS.get_locale_language()), "без выбора язык не системный")
+	# выбор игрока сохраняется и побеждает систему; старый автоматический ключ "lang" игнорируется
+	GameData.lang_choice = "en"
+	GameData.save_game()
+	GameData.lang_choice = ""
+	GameData.load_game()
+	check(GameData.lang_choice == "en", "выбранный язык не сохранился")
+	var f := FileAccess.open(GameData.SAVE_PATH, FileAccess.WRITE)
+	f.store_string(JSON.stringify({"u": 0, "lang": "ru"}))
+	f.close()
+	GameData.load_game()
+	check(GameData.lang_choice == "", "старое автоматическое значение языка считается выбором игрока")
+	GameData.lang_choice = keep
+	GameData.apply_settings()

@@ -19,7 +19,7 @@ func _ready() -> void:
 func _start() -> void:
 	reparent(get_tree().root)
 	GameData.reset_all()
-	GameData.lang = "ru"
+	GameData.lang_choice = "ru"
 	GameData.apply_settings()
 	GameData.unlocked["splash"] = true
 	GameData.u = 7
@@ -265,5 +265,5 @@ func _run() -> void:
 	await _tap("Upgrades")
 	await _wait(0.4)
 	await _shot("upgrades_en")
-	GameData.lang = "ru"
+	GameData.lang_choice = "ru"
 	GameData.apply_settings()

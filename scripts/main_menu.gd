@@ -164,18 +164,29 @@ func _fill_settings() -> void:
 	title.add_theme_font_size_override("font_size", 40)
 	settings_box.add_child(title)
 
-	# язык: кнопки с названиями языков на них самих
+	# язык: «Как в системе» + кнопки с названиями языков на них самих
 	var langs := HBoxContainer.new()
 	langs.add_theme_constant_override("separation", 8)
-	for l in GameData.LANGS:
+	for l in [""] + GameData.LANGS:
 		var b := Button.new()
-		b.text = GameData.LANG_NAMES[l]
-		b.custom_minimum_size = Vector2(130, 54)
-		if l == GameData.lang:
+		b.text = tr("Как в системе") if l == "" else GameData.LANG_NAMES[l]
+		b.custom_minimum_size = Vector2(0, 54)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if l == GameData.lang_choice:
 			b.theme_type_variation = "AccentButton"
 		b.pressed.connect(_set_lang.bind(l))
 		langs.add_child(b)
-	_setting_row(tr("Язык"), "", langs)
+	var lang_card := PanelContainer.new()
+	lang_card.theme_type_variation = "Card"
+	settings_box.add_child(lang_card)
+	var lv := VBoxContainer.new()
+	lv.add_theme_constant_override("separation", 10)
+	lang_card.add_child(lv)
+	var lt := Label.new()
+	lt.text = tr("Язык")
+	lt.theme_type_variation = "Title"
+	lv.add_child(lt)
+	lv.add_child(langs)
 	_setting_row(tr("Экономия батареи"), tr("30 кадров в секунду вместо 60"), _toggle(GameData.eco_mode, _toggle_eco))
 	_setting_row(tr("Не гасить экран"), tr("Пока открыта игра"), _toggle(GameData.keep_screen, _toggle_screen))
 
@@ -197,7 +208,7 @@ func _fill_settings() -> void:
 
 
 func _set_lang(l: String) -> void:
-	GameData.lang = l
+	GameData.lang_choice = l
 	GameData.apply_settings()
 	GameData.save_game()
 	# перестраиваем меню на новом языке
