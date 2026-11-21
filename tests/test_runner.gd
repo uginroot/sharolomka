@@ -36,7 +36,7 @@ func _run() -> void:
 		var ok := failures == f0
 		print("%s  %s  (%d ms)" % ["PASS" if ok else "FAIL", n, Time.get_ticks_msec() - s0])
 	print("\n%d тестов, упало: %d, %.1f с" % [names.size(), failures, (Time.get_ticks_msec() - t0) / 1000.0])
-	print("Важно: ошибка скрипта внутри теста прерывает его без FAIL — ищите в выводе SCRIPT ERROR (CI это проверяет).")
+	print("Важно: ошибка скрипта внутри теста прерывает его без FAIL — CI ищет такие ошибки в выводе.")
 	get_tree().quit(failures)
 
 
