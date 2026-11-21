@@ -21,8 +21,9 @@ func _start() -> void:
 	GameData.reset_all()
 	GameData.lang_choice = "ru"
 	GameData.apply_settings()
-	GameData.unlocked["splash"] = true
-	GameData.u = 7
+	GameData.meta = {"splash": 1}
+	GameData.refresh_unlocked()
+	GameData.save_game()
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 	await _wait(0.6)
 	await _run()
@@ -201,9 +202,9 @@ func _run() -> void:
 	var scrollable := vbar.max_value > vbar.page + 1.0
 	print("    прокрутка: содержимое %.0f, видно %.0f" % [vbar.max_value, vbar.page])
 	if scrollable:
-		var btn: Button = g.perk_refs["basic"]["perk"]
+		var btn: Button = g.perk_refs["basic"][1]
 		var sp: Vector2 = btn.get_global_rect().get_center()
-		var u0: int = GameData.u
+		var u0: int = g.run_u
 		_touch(sp, true)
 		await get_tree().process_frame
 		for k in 12:
@@ -212,7 +213,7 @@ func _run() -> void:
 		_touch(sp - Vector2(0, 360), false)
 		await _wait(0.3)
 		check(sc.scroll_vertical > 0, "список перков прокручивается пальцем с кнопки")
-		check(GameData.u == u0, "прокрутка не нажала кнопку покупки перка")
+		check(g.run_u == u0, "прокрутка не нажала кнопку узла дерева")
 		sc.scroll_vertical = 0
 	tabs0.current_tab = 0
 	await _wait(0.2)
@@ -224,7 +225,12 @@ func _run() -> void:
 	tabs.current_tab = 1
 	await _wait(0.3)
 	await _shot("perks")
-	check(g.mastery_btn != null and g.mastery_btn.is_visible_in_tree(), "в перках есть «Мастерство»")
+	check(g.perk_refs.has("basic") and g.perk_refs["basic"].size() == 8, "во вкладке «Умения» есть дерево из 8 узлов")
+	g.run_u = 3
+	g._refresh_ui()
+	var root_btn: Button = g.perk_refs["basic"][0]
+	await _tap_at(root_btn.get_global_rect().get_center())
+	check(g.tree["basic"][0] and g.run_u == 2, "узел дерева покупается касанием за U уровня")
 	check(await _tap("Вернуться к игре"), "кнопка «Вернуться к игре»")
 	check(not g.upg.visible, "окно прокачки закрылось")
 
@@ -272,6 +278,19 @@ func _run() -> void:
 	var menu_btn2: Button = g2.top_bar.find_children("*", "Button", true, false)[0]
 	await _tap_at(menu_btn2.get_global_rect().get_center())
 	await _wait(1.0)
+	check(await _tap("Наследие"), "в меню есть «Наследие»")
+	await _wait(0.3)
+	await _shot("legacy")
+	var ml = get_tree().current_scene
+	check(ml.legacy_root.visible and ml.legacy_box.get_child_count() == 5, "в «Наследии» 5 веток")
+	ml._show_screen("main")
+	await _wait(0.2)
+	check(await _tap("Профиль 1"), "в меню есть кнопка профиля")
+	await _wait(0.3)
+	await _shot("profiles")
+	check(ml.profiles_box.get_child_count() == 3, "три профиля")
+	ml._show_screen("main")
+	await _wait(0.2)
 	check(await _tap("Настройки"), "в меню есть «Настройки»")
 	await _wait(0.3)
 	await _shot("settings_ru")
@@ -279,7 +298,8 @@ func _run() -> void:
 	var sc_set: ScrollContainer = mset.settings_scroll
 	var bar_set := sc_set.get_v_scroll_bar()
 	print("    настройки: содержимое %.0f, видно %.0f" % [bar_set.max_value, bar_set.page])
-	check(_find(mset, "Вкл") != null, "в настройках есть переключатели (музыка, звуки, вибрация)")
+	check(_find(mset, "Вкл") != null, "в настройках есть переключатели")
+	check(mset.settings_box.find_children("*", "HSlider", true, false).size() == 2, "в настройках два ползунка громкости")
 	check(await _tap("English"), "в настройках можно выбрать English")
 	await _wait(1.0)
 	check(GameData.lang == "en", "язык переключился на английский")

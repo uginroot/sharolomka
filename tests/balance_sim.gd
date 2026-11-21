@@ -34,10 +34,12 @@ func _run() -> void:
 		var r := _play(g, minutes)
 		print("ИТОГ %s: цель %s за %s мин, монет/с в конце %.0f, U всего %d, самое долгое ожидание %.0f с" % [
 			g.map["id"], "достигнута" if g.goal_done else "НЕ достигнута", r["goal_min"], r["last_rate"],
-			GameData.u + r["u_spent"], r["max_wait"]])
+			g.run_u + r["u_spent"], r["max_wait"]])
 		g.queue_free()
 		await get_tree().process_frame
 		GameData.maps_unlocked = maxi(GameData.maps_unlocked, m + 2)
+		spend_stars()
+		print("  ★ после уровня: потрачено, «Наследие»: %s" % str(GameData.meta))
 	get_tree().quit()
 
 
@@ -88,7 +90,7 @@ func _play(g, minutes: float) -> Dictionary:
 			last_rate = rate
 			if verbose:
 				print("%s;%.0f;%.0f;%d;%d;%d;%d;%d;%.0f;" % [g.map["id"], t / 60.0, rate, g.destroyed, g.balls.size(),
-					g._damage_of("basic"), GameData.u, buys_window, maxf(max_wait, t - last_buy)])
+					g._damage_of("basic"), g.run_u, buys_window, maxf(max_wait, t - last_buy)])
 			buys_window = 0
 			next_report += 60.0
 		if g.track_all and g.alive <= 0:
@@ -147,36 +149,45 @@ func _shop(g) -> int:
 	return bought
 
 
+## U-баллы уровня — на самый дешёвый доступный узел деревьев умений (сначала у типов, где есть шары).
 func _spend_u(g) -> int:
 	var spent := 0
-	for t in GameData.TYPE_ORDER:
-		if not GameData.unlocked[t] and GameData.u >= int(GameData.TYPES[t]["unlock_u"]):
-			spent += int(GameData.TYPES[t]["unlock_u"])
-			g._unlock(t)
-	for k in 10:
+	for k in 20:
+		var best_t := ""
+		var best_n := -1
+		var best_c := 999
+		for t in GameData.TYPE_ORDER:
+			if not GameData.unlocked[t]:
+				continue
+			for n in 8:
+				if g._tree_can_buy(t, n):
+					var c: int = g.TREE_COST[n] - (1 if int(g.counts[t]) > 0 else 0)
+					if c < best_c:
+						best_c = c
+						best_t = t
+						best_n = n
+		if best_n < 0:
+			break
+		spent += g.TREE_COST[best_n]
+		g._tree_buy(best_t, best_n)
+	return spent
+
+
+## ★ между уровнями — на самое дешёвое доступное улучшение «Наследия» (типы шаров в приоритете).
+func spend_stars() -> void:
+	for k in 50:
 		var best := ""
 		var bc := 999
-		for t in GameData.TYPE_ORDER:
-			if GameData.unlocked[t] and int(GameData.perks[t]) < GameData.PERK_MAX and int(GameData.perks[t]) + 1 < bc:
-				bc = int(GameData.perks[t]) + 1
-				best = t
-		if best == "" or GameData.u < bc:
+		for m in GameData.META:
+			var id: String = m["id"]
+			if GameData.meta_can_buy(id):
+				var c := GameData.meta_cost(id) - (2 if GameData.TYPES.has(id) else 0)
+				if c < bc:
+					bc = c
+					best = id
+		if best == "":
 			break
-		g._perk_up(best)
-		spent += bc
-	for t in GameData.TYPE_ORDER:
-		if GameData.unlocked[t] and int(GameData.perks[t]) >= GameData.PERK_MAX and not GameData.supers[t] \
-				and GameData.u >= GameData.SUPER_COST:
-			g._super_up(t)
-			spent += GameData.SUPER_COST
-	var all_done := true
-	for t in GameData.TYPE_ORDER:
-		if not GameData.supers[t]:
-			all_done = false
-	while all_done and GameData.u >= GameData.mastery_cost():
-		spent += GameData.mastery_cost()
-		g._mastery_up()
-	return spent
+		GameData.meta_buy(best)
 
 
 func _relaunch_idler(g) -> void:

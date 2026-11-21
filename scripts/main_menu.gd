@@ -7,7 +7,14 @@ const TouchScroll = preload("res://scripts/touch_scroll.gd")
 var scroll: ScrollContainer
 var list: VBoxContainer
 var lbl_u: Label
-var lbl_bonus: Label
+var btn_profile: Button
+var legacy_root: VBoxContainer
+var legacy_box: VBoxContainer
+var legacy_stars: Label
+var profiles_root: VBoxContainer
+var profiles_box: VBoxContainer
+var del_confirm: ConfirmationDialog
+var del_slot := 0
 var confirm: ConfirmationDialog
 var margin: MarginContainer
 var main_box: VBoxContainer
@@ -45,27 +52,20 @@ func _ready() -> void:
 
 	var ur := HBoxContainer.new()
 	ur.alignment = BoxContainer.ALIGNMENT_CENTER
+	ur.add_theme_constant_override("separation", 12)
 	vb.add_child(ur)
+	btn_profile = Button.new()
+	btn_profile.custom_minimum_size = Vector2(0, 50)
+	btn_profile.pressed.connect(_show_screen.bind("profiles"))
+	ur.add_child(btn_profile)
 	var pill := PanelContainer.new()
 	pill.theme_type_variation = "Pill"
 	ur.add_child(pill)
-	var ph := HBoxContainer.new()
-	ph.add_theme_constant_override("separation", 8)
-	pill.add_child(ph)
-	var gi := TextureRect.new()
-	gi.texture = Icons.gem(40)
-	gi.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	gi.custom_minimum_size = Vector2(28, 28)
-	gi.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	ph.add_child(gi)
 	lbl_u = Label.new()
 	lbl_u.add_theme_font_override("font", GameData.font_bold)
-	lbl_u.add_theme_color_override("font_color", GameData.C_GEM)
-	ph.add_child(lbl_u)
-	lbl_bonus = Label.new()
-	lbl_bonus.theme_type_variation = "Muted"
-	lbl_bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vb.add_child(lbl_bonus)
+	lbl_u.add_theme_font_size_override("font_size", 24)
+	lbl_u.add_theme_color_override("font_color", GameData.C_GOLD)
+	pill.add_child(lbl_u)
 
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -86,11 +86,22 @@ func _ready() -> void:
 	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ver.add_theme_font_size_override("font_size", 14)
 	ver.name = "Version"
+	var brow := HBoxContainer.new()
+	brow.add_theme_constant_override("separation", 10)
+	vb.add_child(brow)
+	var bleg := Button.new()
+	bleg.text = tr("Наследие")
+	bleg.theme_type_variation = "AccentButton"
+	bleg.custom_minimum_size.y = 58
+	bleg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bleg.pressed.connect(_show_screen.bind("legacy"))
+	brow.add_child(bleg)
 	var bset := Button.new()
 	bset.text = tr("Настройки")
 	bset.custom_minimum_size.y = 58
+	bset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bset.pressed.connect(_show_settings.bind(true))
-	vb.add_child(bset)
+	brow.add_child(bset)
 	vb.add_child(ver)
 	main_box = vb
 
@@ -123,6 +134,28 @@ func _ready() -> void:
 	back.pressed.connect(_show_settings.bind(false))
 	settings_root.add_child(back)
 
+	legacy_root = _screen_root(tr("Наследие"))
+	var lp := PanelContainer.new()
+	lp.theme_type_variation = "Pill"
+	lp.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	legacy_root.add_child(lp)
+	legacy_root.move_child(lp, 1)
+	legacy_stars = Label.new()
+	legacy_stars.add_theme_font_override("font", GameData.font_bold)
+	legacy_stars.add_theme_font_size_override("font_size", 24)
+	legacy_stars.add_theme_color_override("font_color", GameData.C_GOLD)
+	lp.add_child(legacy_stars)
+	legacy_box = _screen_list(legacy_root)
+	profiles_root = _screen_root(tr("Профили"))
+	profiles_box = _screen_list(profiles_root)
+	del_confirm = ConfirmationDialog.new()
+	del_confirm.title = tr("Удалить")
+	del_confirm.dialog_text = tr("Удалить профиль?")
+	del_confirm.ok_button_text = tr("Удалить")
+	del_confirm.cancel_button_text = tr("Отмена")
+	add_child(del_confirm)
+	del_confirm.confirmed.connect(_do_delete_slot)
+
 	confirm = ConfirmationDialog.new()
 	confirm.title = tr("Сброс")
 	confirm.dialog_text = tr("Удалить весь прогресс?")
@@ -134,6 +167,178 @@ func _ready() -> void:
 	if GameData.has_meta("open_settings"):
 		GameData.remove_meta("open_settings")
 		_show_settings(true)
+
+
+## Экран-подложка: заголовок, прокручиваемый список, кнопка «Назад».
+func _screen_root(title_text: String) -> VBoxContainer:
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 12)
+	root.visible = false
+	margin.add_child(root)
+	var t := Label.new()
+	t.text = title_text
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.add_theme_font_override("font", GameData.font_bold)
+	t.add_theme_font_size_override("font_size", 40)
+	root.add_child(t)
+	var back := Button.new()
+	back.text = tr("Назад")
+	back.theme_type_variation = "AccentButton"
+	back.custom_minimum_size.y = 60
+	back.pressed.connect(_show_screen.bind("main"))
+	root.add_child(back)
+	return root
+
+
+func _screen_list(root: VBoxContainer) -> VBoxContainer:
+	var sc := ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(sc)
+	root.move_child(sc, root.get_child_count() - 2)
+	var box := VBoxContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 12)
+	sc.add_child(box)
+	var ts = TouchScroll.new()
+	ts.target = sc
+	add_child(ts)
+	return box
+
+
+func _show_screen(name: String) -> void:
+	main_box.visible = name == "main"
+	settings_root.visible = name == "settings"
+	legacy_root.visible = name == "legacy"
+	profiles_root.visible = name == "profiles"
+	match name:
+		"main":
+			_fill()
+		"settings":
+			_fill_settings()
+		"legacy":
+			_fill_legacy()
+		"profiles":
+			_fill_profiles()
+
+
+## «Наследие»: ветки — цепочки узлов слева направо (каждый требует предыдущий).
+func _fill_legacy() -> void:
+	for c in legacy_box.get_children():
+		c.queue_free()
+	legacy_stars.text = "★ %d" % GameData.stars
+	for br in GameData.META_BRANCHES:
+		var card := PanelContainer.new()
+		card.theme_type_variation = "Card"
+		legacy_box.add_child(card)
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 8)
+		card.add_child(v)
+		var bt := Label.new()
+		bt.text = tr(br)
+		bt.theme_type_variation = "Title"
+		v.add_child(bt)
+		for m in GameData.META:
+			if m["branch"] != br:
+				continue
+			var id: String = m["id"]
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 10)
+			v.add_child(row)
+			var tv := VBoxContainer.new()
+			tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(tv)
+			var nm := Label.new()
+			var lv := GameData.meta_level(id)
+			var is_type: bool = GameData.TYPES.has(id)
+			nm.text = (("↳ " if String(m["req"]) != "" else "") +
+				(tr("Открыть: %s") % tr(GameData.TYPES[id]["name"]) if is_type else tr(m["name"])))
+			nm.add_theme_font_override("font", GameData.font_bold)
+			tv.add_child(nm)
+			if not is_type:
+				var ds := Label.new()
+				ds.theme_type_variation = "Muted"
+				var mx: int = int(m["max"])
+				ds.text = "%s · %d%s" % [tr(m["desc"]), lv, ("/%d" % mx) if mx > 0 else ""]
+				tv.add_child(ds)
+			var b := Button.new()
+			b.custom_minimum_size = Vector2(130, 50)
+			b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			var maxed: bool = int(m["max"]) > 0 and lv >= int(m["max"])
+			if maxed:
+				b.text = "✓" if is_type else tr("макс.")
+				b.disabled = true
+			else:
+				b.text = "★ %d" % GameData.meta_cost(id)
+				b.disabled = not GameData.meta_can_buy(id)
+				if not b.disabled:
+					b.theme_type_variation = "AccentButton"
+			b.pressed.connect(_buy_meta.bind(id))
+			row.add_child(b)
+
+
+func _buy_meta(id: String) -> void:
+	if GameData.meta_buy(id):
+		Sfx.play("gold" if GameData.TYPES.has(id) else "buy", 0.03)
+	_fill_legacy()
+
+
+## «Профили»: три отдельных прохождения.
+func _fill_profiles() -> void:
+	for c in profiles_box.get_children():
+		c.queue_free()
+	for n in range(1, GameData.SLOTS + 1):
+		var sm := GameData.slot_summary(n)
+		var card := PanelContainer.new()
+		card.theme_type_variation = "Card"
+		profiles_box.add_child(card)
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 10)
+		card.add_child(h)
+		var tv := VBoxContainer.new()
+		tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(tv)
+		var nm := Label.new()
+		nm.text = tr("Профиль %d") % n
+		nm.theme_type_variation = "Title"
+		tv.add_child(nm)
+		var info := Label.new()
+		info.theme_type_variation = "Muted"
+		info.text = tr("Пусто") if sm.is_empty() else "★ %d · %s" % [sm["stars"], tr("уровней пройдено: %d") % sm["done"]]
+		tv.add_child(info)
+		var pick := Button.new()
+		pick.custom_minimum_size = Vector2(130, 52)
+		pick.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		if n == GameData.slot:
+			pick.text = "✓"
+			pick.disabled = true
+		else:
+			pick.text = tr("Выбрать") if not sm.is_empty() else tr("Новая игра")
+			pick.theme_type_variation = "AccentButton"
+			pick.pressed.connect(_pick_slot.bind(n))
+		h.add_child(pick)
+		if not sm.is_empty():
+			var del := Button.new()
+			del.text = "✕"
+			del.custom_minimum_size = Vector2(52, 52)
+			del.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			del.pressed.connect(_ask_delete_slot.bind(n))
+			h.add_child(del)
+
+
+func _pick_slot(n: int) -> void:
+	GameData.select_slot(n)
+	_fill_profiles()
+
+
+func _ask_delete_slot(n: int) -> void:
+	del_slot = n
+	del_confirm.popup_centered()
+
+
+func _do_delete_slot() -> void:
+	GameData.delete_slot(del_slot)
+	_fill_profiles()
 
 
 func _apply_margins() -> void:
@@ -153,12 +358,7 @@ func _apply_margins() -> void:
 
 
 func _show_settings(show: bool) -> void:
-	main_box.visible = not show
-	settings_root.visible = show
-	if show:
-		_fill_settings()
-	else:
-		_fill()
+	_show_screen("settings" if show else "main")
 
 
 func _setting_row(title: String, hint: String, control: Control) -> void:
@@ -206,8 +406,8 @@ func _fill_settings() -> void:
 	settings_box.add_child(title)
 
 	# переключатели — сверху, сетка языков — ниже (на телефоне строки не должны уходить под край)
-	_setting_row(tr("Музыка"), "", _toggle(GameData.music_on, _toggle_music))
-	_setting_row(tr("Звуки игры"), "", _toggle(GameData.sfx_on, _toggle_sfx))
+	_setting_row(tr("Музыка"), "", _slider(GameData.music_vol, _set_music_vol))
+	_setting_row(tr("Звуки игры"), "", _slider(GameData.sfx_vol, _set_sfx_vol))
 	_setting_row(tr("Вибрация"), tr("Короткий отклик, когда начинается прицел"), _toggle(GameData.vibration_on, _toggle_vibration))
 	_setting_row(tr("Экономия батареи"), tr("30 кадров в секунду вместо 60"), _toggle(GameData.eco_mode, _toggle_eco))
 	_setting_row(tr("Не гасить экран"), tr("Пока открыта игра"), _toggle(GameData.keep_screen, _toggle_screen))
@@ -242,7 +442,7 @@ func _fill_settings() -> void:
 func _set_lang(l: String) -> void:
 	GameData.lang_choice = l
 	GameData.apply_settings()
-	GameData.save_game()
+	GameData.save_settings()
 	# перестраиваем меню на новом языке
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 	GameData.set_meta("open_settings", true)
@@ -251,27 +451,53 @@ func _set_lang(l: String) -> void:
 func _toggle_eco() -> void:
 	GameData.eco_mode = not GameData.eco_mode
 	GameData.apply_settings()
-	GameData.save_game()
+	GameData.save_settings()
 	_fill_settings()
+
+
+## Ползунок громкости 0..100% (0 — выключено).
+func _slider(value: float, cb: Callable) -> HSlider:
+	var s := HSlider.new()
+	s.min_value = 0.0
+	s.max_value = 1.0
+	s.step = 0.05
+	s.value = value
+	s.custom_minimum_size = Vector2(240, 44)
+	s.value_changed.connect(cb)
+	s.drag_ended.connect(func(_c): GameData.save_settings())
+	return s
+
+
+func _set_music_vol(v: float) -> void:
+	GameData.music_vol = v
+	GameData.apply_settings()
+	Sfx.apply()
+
+
+func _set_sfx_vol(v: float) -> void:
+	GameData.sfx_vol = v
+	GameData.apply_settings()
+	Sfx.apply()
+	Sfx.play("tap", 0.0)
 
 
 func _toggle_music() -> void:
 	GameData.music_on = not GameData.music_on
 	Sfx.apply()
-	GameData.save_game()
+	GameData.save_settings()
 	_fill_settings()
 
 
 func _toggle_sfx() -> void:
 	GameData.sfx_on = not GameData.sfx_on
 	Sfx.apply()
-	GameData.save_game()
+	GameData.save_settings()
 	_fill_settings()
 
 
 func _toggle_vibration() -> void:
 	GameData.vibration_on = not GameData.vibration_on
-	GameData.save_game()
+	GameData.save_settings()
 	GameData.vibrate(40)   # сразу показать, как ощущается
 	_fill_settings()
 
@@ -279,7 +505,7 @@ func _toggle_vibration() -> void:
 func _toggle_screen() -> void:
 	GameData.keep_screen = not GameData.keep_screen
 	GameData.apply_settings()
-	GameData.save_game()
+	GameData.save_settings()
 	_fill_settings()
 
 
@@ -295,10 +521,8 @@ func _do_reset() -> void:
 func _fill() -> void:
 	for c in list.get_children():
 		c.queue_free()
-	lbl_u.text = "%d" % GameData.u
-	var bonus := int(round((GameData.coin_mult() - 1.0) * 100.0))
-	lbl_bonus.text = tr("Бонус монет +%d%%") % bonus
-	lbl_bonus.visible = bonus > 0
+	lbl_u.text = "★ %d" % GameData.stars
+	btn_profile.text = tr("Профиль %d") % GameData.slot
 	# пройденные и открытые уровни + следующий закрытый; уровни бесконечны
 	var count := maxi(Maps.HANDMADE, GameData.maps_unlocked + 1)
 	var current_card: Control = null
@@ -373,7 +597,7 @@ func _open(i: int) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
-		if settings_root != null and settings_root.visible:
-			_show_settings(false)
+		if not main_box.visible:
+			_show_screen("main")
 		else:
 			get_tree().quit()

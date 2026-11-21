@@ -1,12 +1,9 @@
 extends Node
 ## Глобальные данные: типы шариков, U-баллы, перки, открытые карты, сохранения.
 
-const SAVE_PATH := "user://save.json"
 const I18n = preload("res://scripts/i18n.gd")
 const LANGS := I18n.LANGS
 const LANG_NAMES := I18n.NAMES
-const PERK_MAX := 5
-const SUPER_COST := 15
 const TYPE_ORDER := ["basic", "splash", "sniper", "pierce", "poison"]
 
 const TYPES := {
@@ -52,23 +49,110 @@ const TYPES := {
 	},
 }
 
-var u := 0
-var unlocked := {}
-var perks := {}
-var supers := {}
-var mastery := 0             # «Мастерство»: +10% урона всем шарам за уровень, без предела (вечная трата U)
+# ---------------------------------------------------------------- прогресс профиля (слота)
+var stars := 0               # ★ — за завершение уровней, тратятся в «Наследии»
+var meta := {}               # постоянные улучшения: id → уровень
+var unlocked := {}           # открытые типы шаров (вычисляется из «Арсенала»)
 var maps_unlocked := 1
 var maps_done := {}
 var map_states := {}
 var current_map := 0
-var eco_mode := false       # 30 FPS вместо 60
-var keep_screen := false    # не гасить экран во время игры
-var music_on := true        # музыка
-var sfx_on := true          # звуки игры
-var vibration_on := true    # мини-вибрация при начале прицеливания
-var vibrations := 0         # счётчик вибраций — для тестов
-var lang := "ru"            # действующий язык интерфейса
-var lang_choice := ""       # выбор игрока; пусто — как в системе (русский, если система на русском, иначе английский)
+var slot := 1                # текущий профиль 1..SLOTS
+
+# ---------------------------------------------------------------- общие настройки (на все профили)
+var eco_mode := false        # 30 FPS вместо 60
+var keep_screen := false     # не гасить экран во время игры
+var music_vol := 0.8         # громкость музыки 0..1 (0 — выключена)
+var sfx_vol := 0.8           # громкость звуков 0..1
+var music_on := true         # = music_vol > 0
+var sfx_on := true           # = sfx_vol > 0
+var vibration_on := true     # мини-вибрация при начале прицеливания
+var vibrations := 0          # счётчик вибраций — для тестов
+var lang := "ru"             # действующий язык интерфейса
+var lang_choice := ""        # выбор игрока; пусто — как в системе
+
+const SLOTS := 3
+const SETTINGS_PATH := "user://settings.json"
+
+## «Наследие» — постоянные улучшения за ★. Ветки — цепочки: узел требует предыдущий (req).
+## max 0 — без предела; цена = cost + step·уровень.
+const META := [
+	{"id": "splash", "branch": "Арсенал", "max": 1, "cost": 1, "step": 0, "req": ""},
+	{"id": "sniper", "branch": "Арсенал", "max": 1, "cost": 2, "step": 0, "req": "splash"},
+	{"id": "pierce", "branch": "Арсенал", "max": 1, "cost": 4, "step": 0, "req": "sniper"},
+	{"id": "poison", "branch": "Арсенал", "max": 1, "cost": 6, "step": 0, "req": "pierce"},
+	{"id": "coin_bonus", "branch": "Казна", "name": "Бонус монет", "desc": "+10% монет", "max": 0, "cost": 1, "step": 1, "req": ""},
+	{"id": "start_coins", "branch": "Казна", "name": "Стартовые монеты", "desc": "Монеты на старте уровня", "max": 5, "cost": 2, "step": 1, "req": "coin_bonus"},
+	{"id": "dmg_bonus", "branch": "Сила", "name": "Урон", "desc": "+10% урона всех шаров", "max": 0, "cost": 1, "step": 1, "req": ""},
+	{"id": "frenzy", "branch": "Сила", "name": "Золотая лихорадка", "desc": "+3 с лихорадки", "max": 5, "cost": 2, "step": 1, "req": "dmg_bonus"},
+	{"id": "u_find", "branch": "Удача", "name": "Поиск U", "desc": "+20% U-баллов", "max": 5, "cost": 2, "step": 1, "req": ""},
+	{"id": "start_u", "branch": "Удача", "name": "Стартовые U", "desc": "+1 U на старте уровня", "max": 5, "cost": 2, "step": 1, "req": "u_find"},
+	{"id": "start_balls", "branch": "Старт", "name": "Стартовые шары", "desc": "+1 бесплатный шар на старте", "max": 5, "cost": 3, "step": 1, "req": ""},
+	{"id": "gold", "branch": "Старт", "name": "Золотые квадраты", "desc": "+20% золотых квадратов", "max": 5, "cost": 2, "step": 1, "req": "start_balls"},
+]
+const META_BRANCHES := ["Арсенал", "Казна", "Сила", "Удача", "Старт"]
+
+
+func meta_def(id: String) -> Dictionary:
+	for m in META:
+		if m["id"] == id:
+			return m
+	return {}
+
+
+func meta_level(id: String) -> int:
+	return int(meta.get(id, 0))
+
+
+func meta_cost(id: String) -> int:
+	var m := meta_def(id)
+	return int(m["cost"]) + int(m["step"]) * meta_level(id)
+
+
+## Можно ли купить следующий уровень узла: предыдущий узел ветки изучен, не максимум, хватает ★.
+func meta_can_buy(id: String) -> bool:
+	var m := meta_def(id)
+	if m.is_empty():
+		return false
+	if int(m["max"]) > 0 and meta_level(id) >= int(m["max"]):
+		return false
+	if String(m["req"]) != "" and meta_level(m["req"]) <= 0:
+		return false
+	return stars >= meta_cost(id)
+
+
+func meta_buy(id: String) -> bool:
+	if not meta_can_buy(id):
+		return false
+	stars -= meta_cost(id)
+	meta[id] = meta_level(id) + 1
+	refresh_unlocked()
+	save_game()
+	return true
+
+
+func refresh_unlocked() -> void:
+	for t in TYPE_ORDER:
+		unlocked[t] = t == "basic" or meta_level(t) > 0
+
+
+## Эффекты «Наследия».
+func coin_mult() -> float:
+	return 1.0 + 0.10 * meta_level("coin_bonus")
+
+
+func dmg_mult() -> float:
+	return 1.0 + 0.10 * meta_level("dmg_bonus")
+
+
+func start_coins() -> int:
+	var lv := meta_level("start_coins")
+	return 0 if lv == 0 else int(30 * pow(3, lv))
+
+
+## ★ за выполненную цель уровня: впервые — 3 + номер уровня (с нуля), повторно — 1.
+static func stars_for(map_index: int, first: bool) -> int:
+	return 3 + map_index if first else 1
 
 
 func _ready() -> void:
@@ -81,6 +165,8 @@ func _ready() -> void:
 		for k in tab:
 			t.add_message(k, tab[k])
 		TranslationServer.add_translation(t)
+	_migrate_old_save()
+	load_settings()
 	_reset_defaults()
 	load_game()
 	apply_settings()
@@ -97,28 +183,52 @@ func apply_settings() -> void:
 	TranslationServer.set_locale(lang)
 	Engine.max_fps = 30 if eco_mode else 60
 	DisplayServer.screen_set_keep_on(keep_screen)
+	music_on = music_vol > 0.01
+	sfx_on = sfx_vol > 0.01
 
 
 func _reset_defaults() -> void:
-	u = 0
-	unlocked = {}
-	perks = {}
-	supers = {}
-	for t in TYPE_ORDER:
-		unlocked[t] = (t == "basic")
-		perks[t] = 0
-		supers[t] = false
+	stars = 0
+	meta = {}
 	maps_unlocked = 1
-	mastery = 0
 	maps_done = {}
 	map_states = {}
+	refresh_unlocked()
+
+
+# ---------------------------------------------------------------- файлы
+
+func slot_dir(n: int = -1) -> String:
+	return "user://slot%d/" % (slot if n < 0 else n)
+
+
+func save_path(n: int = -1) -> String:
+	return slot_dir(n) + "save.json"
+
+
+static func write_atomic(path: String, text: String) -> void:
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	var f := FileAccess.open(path + ".tmp", FileAccess.WRITE)
+	if f:
+		f.store_string(text)
+		f.close()
+		DirAccess.rename_absolute(path + ".tmp", path)
+
+
+static func read_json(path: String):
+	if not FileAccess.file_exists(path):
+		return null
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return null
+	return JSON.parse_string(f.get_as_text())
 
 
 var _save_pending := false
 var _save_wait := 0.0
 
 
-## Отложенное сохранение: не чаще раза в 3 с (U-баллы находятся часто).
+## Отложенное сохранение: не чаще раза в 3 с.
 func request_save() -> void:
 	_save_pending = true
 
@@ -139,49 +249,111 @@ func _notification(what: int) -> void:
 func save_game() -> void:
 	_save_pending = false
 	_save_wait = 0.0
-	var data := {
-		"u": u, "unlocked": unlocked, "perks": perks, "supers": supers,
-		"maps_unlocked": maps_unlocked, "mastery": mastery, "maps_done": maps_done, "map_states": map_states,
-		"eco_mode": eco_mode, "keep_screen": keep_screen, "lang_choice": lang_choice,
-		"music_on": music_on, "sfx_on": sfx_on, "vibration_on": vibration_on,
-	}
-	# атомарно: временный файл + переименование
-	var f := FileAccess.open(SAVE_PATH + ".tmp", FileAccess.WRITE)
-	if f:
-		f.store_string(JSON.stringify(data))
-		f.close()
-		DirAccess.rename_absolute(SAVE_PATH + ".tmp", SAVE_PATH)
+	write_atomic(save_path(), JSON.stringify({
+		"ver": 2, "stars": stars, "meta": meta, "maps_unlocked": maps_unlocked,
+		"maps_done": maps_done, "map_states": map_states, "played_at": Time.get_unix_time_from_system(),
+	}))
 
 
 func load_game() -> void:
-	if not FileAccess.file_exists(SAVE_PATH):
-		return
-	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
-	if f == null:
-		return
-	var data = JSON.parse_string(f.get_as_text())
+	_reset_defaults()
+	var data = read_json(save_path())
 	if typeof(data) != TYPE_DICTIONARY:
 		return
 	# повреждённый или чужой файл не должен ронять игру: каждое поле проверяем по типу
-	u = maxi(0, int(data.get("u", 0))) if typeof(data.get("u", 0)) in [TYPE_INT, TYPE_FLOAT] else 0
-	var ul: Dictionary = _dict(data.get("unlocked", {}))
-	var pk: Dictionary = _dict(data.get("perks", {}))
-	var sp: Dictionary = _dict(data.get("supers", {}))
-	for t in TYPE_ORDER:
-		unlocked[t] = bool(ul.get(t, t == "basic"))
-		perks[t] = clampi(int(pk.get(t, 0)), 0, PERK_MAX) if typeof(pk.get(t, 0)) in [TYPE_INT, TYPE_FLOAT] else 0
-		supers[t] = bool(sp.get(t, false))
-	maps_unlocked = maxi(1, int(data.get("maps_unlocked", 1))) if typeof(data.get("maps_unlocked", 1)) in [TYPE_INT, TYPE_FLOAT] else 1
+	stars = _int(data.get("stars", 0))
+	var mt: Dictionary = _dict(data.get("meta", {}))
+	for m in META:
+		var lv := _int(mt.get(m["id"], 0))
+		if int(m["max"]) > 0:
+			lv = mini(lv, int(m["max"]))
+		if lv > 0:
+			meta[m["id"]] = lv
+	maps_unlocked = maxi(1, _int(data.get("maps_unlocked", 1)))
 	maps_done = _dict(data.get("maps_done", {}))
-	mastery = maxi(0, int(data.get("mastery", 0))) if typeof(data.get("mastery", 0)) in [TYPE_INT, TYPE_FLOAT] else 0
 	map_states = _dict(data.get("map_states", {}))
-	eco_mode = bool(data.get("eco_mode", false))
-	keep_screen = bool(data.get("keep_screen", false))
-	music_on = bool(data.get("music_on", true))
-	sfx_on = bool(data.get("sfx_on", true))
-	vibration_on = bool(data.get("vibration_on", true))
-	# старый ключ "lang" записывался автоматически — не считаем его выбором игрока
-	lang_choice = String(data.get("lang_choice", ""))
+	refresh_unlocked()
+
+
+func save_settings() -> void:
+	write_atomic(SETTINGS_PATH, JSON.stringify({
+		"eco_mode": eco_mode, "keep_screen": keep_screen, "lang_choice": lang_choice,
+		"music_vol": music_vol, "sfx_vol": sfx_vol, "vibration_on": vibration_on, "slot": slot,
+	}))
+
+
+func load_settings() -> void:
+	var d = read_json(SETTINGS_PATH)
+	if typeof(d) != TYPE_DICTIONARY:
+		return
+	eco_mode = bool(d.get("eco_mode", false))
+	keep_screen = bool(d.get("keep_screen", false))
+	lang_choice = String(d.get("lang_choice", ""))
+	music_vol = clampf(float(d.get("music_vol", 0.8)), 0.0, 1.0) if typeof(d.get("music_vol", 0.8)) in [TYPE_INT, TYPE_FLOAT] else 0.8
+	sfx_vol = clampf(float(d.get("sfx_vol", 0.8)), 0.0, 1.0) if typeof(d.get("sfx_vol", 0.8)) in [TYPE_INT, TYPE_FLOAT] else 0.8
+	vibration_on = bool(d.get("vibration_on", true))
+	slot = clampi(_int(d.get("slot", 1)), 1, SLOTS)
+
+
+## Профили: краткая сводка для экрана выбора (без переключения).
+func slot_summary(n: int) -> Dictionary:
+	var d = read_json(save_path(n))
+	if typeof(d) != TYPE_DICTIONARY:
+		return {}
+	return {"stars": _int(d.get("stars", 0)), "done": _dict(d.get("maps_done", {})).size(),
+		"unlocked": maxi(1, _int(d.get("maps_unlocked", 1)))}
+
+
+func select_slot(n: int) -> void:
+	if _save_pending:
+		save_game()
+	slot = clampi(n, 1, SLOTS)
+	save_settings()
+	load_game()
+
+
+func delete_slot(n: int) -> void:
+	var dir := DirAccess.open(slot_dir(n))
+	if dir:
+		for f in dir.get_files():
+			dir.remove(f)
+	if n == slot:
+		load_game()
+
+
+## Старое сохранение (до v0.20, один профиль в корне user://) переносится в профиль 1:
+## пройденные карты → ★, открытые типы шаров остаются открытыми, «Мастерство» → ★.
+func _migrate_old_save() -> void:
+	var old = read_json("user://save.json")
+	if typeof(old) != TYPE_DICTIONARY:
+		return
+	DirAccess.make_dir_recursive_absolute(slot_dir(1))
+	var done: Dictionary = _dict(old.get("maps_done", {}))
+	var st := 0
+	var i := 0
+	for id in done:
+		st += stars_for(i, true)
+		i += 1
+	st += _int(old.get("mastery", 0))
+	var mt := {}
+	var ul: Dictionary = _dict(old.get("unlocked", {}))
+	for t in ["splash", "sniper", "pierce", "poison"]:
+		if bool(ul.get(t, false)):
+			mt[t] = 1
+	write_atomic(save_path(1), JSON.stringify({"ver": 2, "stars": st, "meta": mt,
+		"maps_unlocked": _int(old.get("maps_unlocked", 1)), "maps_done": done, "map_states": {}}))
+	write_atomic(SETTINGS_PATH, JSON.stringify({
+		"eco_mode": bool(old.get("eco_mode", false)), "keep_screen": bool(old.get("keep_screen", false)),
+		"lang_choice": String(old.get("lang_choice", "")),
+		"music_vol": 0.8 if bool(old.get("music_on", true)) else 0.0,
+		"sfx_vol": 0.8 if bool(old.get("sfx_on", true)) else 0.0,
+		"vibration_on": bool(old.get("vibration_on", true)), "slot": 1}))
+	var root := DirAccess.open("user://")
+	if root:
+		for f in root.get_files():
+			if f.begins_with("map_") and f.ends_with(".bin"):
+				root.remove(f)   # раскладка уровней изменилась — начатые карты всё равно начались бы заново
+		root.remove("save.json")
 
 
 ## Мини-вибрация (если включена в настройках). На Android нужно разрешение VIBRATE в экспорт-пресете.
@@ -193,49 +365,18 @@ func vibrate(ms: int) -> void:
 		Input.vibrate_handheld(ms)
 
 
-## «Мастерство»: бесконечная трата U, когда перки и суперы куплены.
-const MASTERY_STEP := 0.10
-
-
-func mastery_cost() -> int:
-	return 5 + 2 * mastery
-
-
-func mastery_mult() -> float:
-	return 1.0 + MASTERY_STEP * mastery
-
-
-## Постоянный бонус монет: +25% за каждую выполненную цель карты.
-const MAP_BONUS := 0.25
-
-
-func coin_mult() -> float:
-	return 1.0 + MAP_BONUS * maps_done.size()
-
-
 static func _dict(v) -> Dictionary:
 	return v if typeof(v) == TYPE_DICTIONARY else {}
 
 
+static func _int(v) -> int:
+	return maxi(0, int(v)) if typeof(v) in [TYPE_INT, TYPE_FLOAT] else 0
+
+
+## Сбросить текущий профиль.
 func reset_all() -> void:
-	var e := eco_mode
-	var k := keep_screen
-	var mu := music_on
-	var sx := sfx_on
-	var vb := vibration_on
-	var l := lang_choice
+	delete_slot(slot)
 	_reset_defaults()
-	var dir := DirAccess.open("user://")
-	if dir:
-		for f in dir.get_files():
-			if f.begins_with("map_") and f.ends_with(".bin"):
-				dir.remove(f)
-	eco_mode = e
-	keep_screen = k
-	music_on = mu
-	sfx_on = sx
-	vibration_on = vb
-	lang_choice = l
 	save_game()
 
 

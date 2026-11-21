@@ -20,6 +20,10 @@ const WARP_BUDGET_US := 9000     # сколько микросекунд за к
 const PREGEN_LIMIT := 60000      # карты меньше этого генерируем целиком (можно пройти на 100%)
 const GOLD_RATE := 30            # золотой квадрат: шанс на 10 000
 const FRENZY_TIME := 15.0        # «золотая лихорадка»: урон ×2, секунд
+## Дерево умений шара: 0 основа; 1–3 ветка «умение типа»; 4–6 ветка «скорость»; 7 суперспособность.
+const TREE_COST := [1, 2, 3, 4, 2, 3, 4, 6]
+const TREE_REQ := [[], [0], [1], [2], [0], [4], [5], [3, 6]]
+const U_PER_LEVEL := 25.0        # сколько U-баллов в среднем находится до цели уровня
 const FINALE_SHARE := 0.08       # финал маленькой карты, когда осталось ≤ 8% квадратов
 const FOG := Color(0.07, 0.08, 0.11)
 const FLOOR := Color(0.13, 0.15, 0.2)
@@ -60,9 +64,15 @@ var total := 0
 var destroyed := 0
 var goal := 0
 var goal_done := false
+var run_u := 0                   # U-баллы этого уровня — тратятся на деревья умений шаров
+var tree := {}                   # дерево умений: тип → 8 флагов (сбрасывается каждый уровень)
+var u_ppm := 0                   # шанс U-балла в квадрате на миллион
+var gold_rate := GOLD_RATE       # шанс золотого квадрата на 10 000 (+ «Наследие»)
+var frenzy_time := FRENZY_TIME
 var coin_acc := 0.0              # дробная часть монет при бонусе
 var coin_mult := 1.0
 var frenzy_t := 0.0              # осталось «золотой лихорадки»
+var frenzy_max := 15.0           # длина полоски лихорадки
 var finale := false              # финал: шары летят к последним квадратам
 var finale_ids := PackedInt32Array()
 var finale_dist := PackedInt32Array()
@@ -176,6 +186,8 @@ var toast_t := 0.0
 
 func _ready() -> void:
 	map_index = maxi(0, GameData.current_map)
+	gold_rate = int(GOLD_RATE * (1.0 + 0.2 * GameData.meta_level("gold")))
+	frenzy_time = FRENZY_TIME + 3.0 * GameData.meta_level("frenzy")
 	map = Maps.get_map(map_index)
 	floor_col = map.get("floor", FLOOR)
 	hue_shift = float(map.get("hue", 0.0))
@@ -231,9 +243,14 @@ func _ready() -> void:
 	add_child(overlay)
 	overlay.draw.connect(_draw_overlay)
 
+	for t in GameData.TYPE_ORDER:
+		tree[t] = [false, false, false, false, false, false, false, false]
 	var saved_at := _load_state()
 	if saved_at <= 0.0:
-		counts["basic"] = 1
+		# новый уровень: всё с нуля, кроме «Наследия»
+		counts["basic"] = 1 + GameData.meta_level("start_balls")
+		coins = GameData.start_coins()
+		run_u = GameData.meta_level("start_u")
 	if track_all:
 		alive = 0
 		total = 0
@@ -244,6 +261,8 @@ func _ready() -> void:
 					alive += 1
 		total = alive + destroyed
 	goal = total if int(map["goal"]) == 0 else int(map["goal"])
+	# U-баллы: в среднем U_PER_LEVEL до цели уровня (+20% за уровень «Поиска U»)
+	u_ppm = int(minf(U_PER_LEVEL / maxf(1.0, float(goal)) * 1.0e6 * (1.0 + 0.2 * GameData.meta_level("u_find")), 200000.0))
 	# площадка у старта открыта
 	for y in range(start_cell.y - 3, start_cell.y + 4):
 		for x in range(start_cell.x - 3, start_cell.x + 4):
@@ -335,7 +354,7 @@ func _gen_chunk(ck: int, blob: Array):
 				continue
 			c.kind[li] = 1
 			c.hp[li] = int(minf(ceil(hb * pow(1.0 + sqrt(d2) * hg, 1.6)), 2.0e9))   # жизни хранятся в int32
-			if _hash3(x, y, seed_i + 13) % 10000 < GOLD_RATE:
+			if _hash3(x, y, seed_i + 13) % 10000 < gold_rate:
 				c.gold[li] = 1
 			solid += 1
 	if not blob.is_empty():
@@ -678,7 +697,7 @@ func _reveal(x: int, y: int) -> void:
 # ================================================================ сохранение
 
 func _save_path() -> String:
-	return "user://map_%s.bin" % String(map["id"])
+	return GameData.slot_dir() + "map_%s.bin" % String(map["id"])
 
 
 func _load_state() -> float:
@@ -689,7 +708,7 @@ func _load_state() -> float:
 	if f == null:
 		return 0.0
 	var s = f.get_var()
-	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 5 or int(s.get("w", 0)) != W:
+	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 6 or int(s.get("w", 0)) != W:
 		return 0.0
 	coins = int(s.get("coins", s.get("rubles", 0)))   # до v0.14 ключ назывался "rubles"
 	destroyed = int(s.get("destroyed", 0))
@@ -703,6 +722,12 @@ func _load_state() -> float:
 		spd_lvl[t] = int(sl.get(t, 0))
 	if int(counts["basic"]) == 0:
 		counts["basic"] = 1
+	run_u = int(s.get("u", 0))
+	var tr_saved: Dictionary = s.get("tree", {})
+	for t in GameData.TYPE_ORDER:
+		var arr: Array = tr_saved.get(t, [])
+		if arr.size() == 8:
+			tree[t] = arr.map(func(v): return bool(v))
 	saved_balls = s.get("balls", [])
 	var ll: Array = s.get("last_launch", [])
 	if ll.size() == 2:
@@ -744,11 +769,12 @@ func _save_state() -> void:
 			c.blob_dirty = false
 		out[ck] = c.blob
 	var s := {
-		"ver": 5, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
+		"ver": 6, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
 		"counts": counts.duplicate(), "dmg": dmg_lvl.duplicate(), "spd": spd_lvl.duplicate(),
 		"saved_at": Time.get_unix_time_from_system(), "chunks": out,
 		"balls": balls.map(func(b): return [b.type, b.pos.x, b.pos.y, b.vel.x, b.vel.y]),
 		"last_launch": [last_launch.x, last_launch.y], "aim": aim_angle, "selected": selected,
+		"u": run_u, "tree": tree.duplicate(true),
 	}
 	# пишем во временный файл и переименовываем: если телефон выключится посреди записи,
 	# останется прежнее целое сохранение, а не обрезанный файл
@@ -777,16 +803,24 @@ func _notification(what: int) -> void:
 # ================================================================ характеристики
 
 func _speed(t: String) -> float:
-	return float(GameData.TYPES[t]["speed"]) * (1.0 + 0.08 * int(spd_lvl[t]))
+	var b: int = int(tree[t][4]) + int(tree[t][5]) + int(tree[t][6])   # ветка «скорость»: +10% за узел
+	return float(GameData.TYPES[t]["speed"]) * (1.0 + 0.08 * int(spd_lvl[t])) * (1.0 + 0.1 * b)
+
+
+## Уровень умения типа (0..5) по ветке дерева: 1 узел → 2, 2 → 4, 3 → 5.
+func _perk_lvl(t: String) -> int:
+	return [0, 2, 4, 5][int(tree[t][1]) + int(tree[t][2]) + int(tree[t][3])]
 
 
 ## Урон: base·(1 + ур.) и ×2 на каждом 10-м уровне — вехи держат рост экспоненциальным
 ## (без них доход глохнет против экспоненциальных цен — симулятор баланса v0.16).
 func _damage_of(t: String) -> int:
 	var lv := int(dmg_lvl[t])
-	var d := float(GameData.TYPES[t]["damage"]) * (1 + lv) * pow(2.0, floori(lv / 10.0)) * GameData.mastery_mult()
+	var d := float(GameData.TYPES[t]["damage"]) * (1 + lv) * pow(2.0, floori(lv / 10.0)) * GameData.dmg_mult()
+	if tree[t][0]:
+		d *= 1.2   # основа дерева: +20% урона
 	if t == "pierce":
-		d *= 1.0 + 0.2 * int(GameData.perks[t])
+		d *= 1.0 + 0.2 * _perk_lvl(t)
 	return maxi(1, int(round(d)))
 
 
@@ -801,8 +835,8 @@ func _recalc_stats() -> void:
 	for ti in GameData.TYPE_ORDER.size():
 		var t: String = GameData.TYPE_ORDER[ti]
 		st_dmg[ti] = _damage_of(t)
-		st_lvl[ti] = int(GameData.perks[t])
-		st_sup[ti] = 1 if GameData.supers[t] else 0
+		st_lvl[ti] = _perk_lvl(t)
+		st_sup[ti] = 1 if tree[t][7] else 0
 
 
 ## Цена base·growth^n с потолком: без него на больших n float выходит за int64 и цена
@@ -1208,10 +1242,9 @@ func _damage(id: int, amount: int, b) -> void:
 func _on_destroyed(x: int, y: int, id: int) -> void:
 	_reveal(x, y)
 	# U-баллы спрятаны в части квадратов (в полостях картинок — чаще)
-	var rate := int(map.get("u_rate", 10)) * (2 if _mask_at(x, y) == 4 else 1)
-	if _hash3(x, y, seed_i + 7) % 10000 < rate:
-		GameData.u += 1
-		GameData.request_save()   # отложенно: при частых находках не дёргаем флеш-память
+	var ppm := u_ppm * (2 if _mask_at(x, y) == 4 else 1)   # в полостях картинок — вдвое чаще
+	if _hash3(x, y, seed_i + 7) % 1000000 < ppm:
+		run_u += 1
 		Sfx.play("u", 0.03)
 		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "+1 U", "t": 1.5})
 		overlay_dirty = true
@@ -1219,9 +1252,9 @@ func _on_destroyed(x: int, y: int, id: int) -> void:
 	var li := ((y & 31) << 5) | (x & 31)
 	if c.gold[li] == 1:
 		c.gold[li] = 0
-		frenzy_t = minf(maxf(frenzy_t, 0.0) + FRENZY_TIME, FRENZY_TIME * 2.0)   # копится, но не больше 30 с
+		frenzy_t = minf(maxf(frenzy_t, 0.0) + frenzy_time, frenzy_time * 2.0)   # копится, но не больше двух
+		frenzy_max = maxf(frenzy_t, frenzy_time)
 		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "×2!", "t": 1.5})
-		_show_toast(tr("Золотой квадрат! Урон ×2 на %d с") % int(FRENZY_TIME))
 		Sfx.play("gold", 0.0)
 	if poisons.has(id):
 		var p: Dictionary = poisons[id]
@@ -1349,15 +1382,14 @@ func _check_goal() -> void:
 	if not goal_done and destroyed >= goal:
 		goal_done = true
 		var id := String(map["id"])
-		var reward := 2 if GameData.maps_done.has(id) else 5
-		GameData.u += reward
+		var gained := GameData.stars_for(map_index, not GameData.maps_done.has(id))
+		GameData.stars += gained
 		GameData.maps_done[id] = true
-		coin_mult = GameData.coin_mult()
 		GameData.maps_unlocked = maxi(GameData.maps_unlocked, map_index + 2)
 		GameData.save_game()
 		if not (track_all and alive <= 0):
 			Sfx.play("goal", 0.0)
-			_show_toast(tr("Цель карты выполнена!\n+%d U, +%d%% монет навсегда, открыта следующая карта") % [reward, int(GameData.MAP_BONUS * 100)])
+			_show_toast(tr("Цель уровня выполнена!\n+%d ★, открыт следующий уровень") % gained)
 	if track_all and alive <= 0 and not completed:
 		completed = true
 		GameData.map_states.erase(String(map["id"]))
@@ -2011,49 +2043,27 @@ func _relaunch_idler(p: Vector2) -> void:
 	_refresh_ui()
 
 
-func _unlock(t: String) -> void:
-	var c := int(GameData.TYPES[t]["unlock_u"])
-	if GameData.u < c or GameData.unlocked[t]:
-		return
-	GameData.u -= c
-	GameData.unlocked[t] = true
-	Sfx.play("gold", 0.0)
-	GameData.save_game()
-	_rebuild_rows()
+## Купить узел дерева умений за U-баллы уровня (нужны предыдущие узлы ветки).
+func _tree_can_buy(t: String, node: int) -> bool:
+	if tree[t][node] or not GameData.unlocked[t] or run_u < TREE_COST[node]:
+		return false
+	for r in TREE_REQ[node]:
+		if not tree[t][r]:
+			return false
+	return true
 
 
-func _perk_up(t: String) -> void:
-	var lvl := int(GameData.perks[t])
-	if lvl >= GameData.PERK_MAX or GameData.u < lvl + 1:
+func _tree_buy(t: String, node: int) -> void:
+	if not _tree_can_buy(t, node):
 		return
-	GameData.u -= lvl + 1
-	GameData.perks[t] = lvl + 1
-	Sfx.play("buy", 0.04)
-	GameData.save_game()
+	run_u -= TREE_COST[node]
+	tree[t][node] = true
+	Sfx.play("gold" if node == 7 else "buy", 0.04)
 	_recalc_stats()
-	_refresh_ui()
-
-
-func _super_up(t: String) -> void:
-	if GameData.supers[t] or GameData.u < GameData.SUPER_COST:
-		return
-	GameData.u -= GameData.SUPER_COST
-	GameData.supers[t] = true
-	Sfx.play("gold", 0.0)
-	GameData.save_game()
-	_recalc_stats()
-	_refresh_ui()
-
-
-func _mastery_up() -> void:
-	var c := GameData.mastery_cost()
-	if GameData.u < c:
-		return
-	GameData.u -= c
-	GameData.mastery += 1
-	Sfx.play("buy", 0.04)
-	GameData.save_game()
-	_recalc_stats()
+	var sp := _speed(t)
+	for b in balls:
+		if b.type == t:
+			b.vel = b.vel.normalized() * sp
 	_refresh_ui()
 
 
@@ -2074,8 +2084,9 @@ func _to_menu() -> void:
 var ic_coin: ImageTexture
 var ic_gem: ImageTexture
 var prog_bar: ProgressBar
-var mastery_btn: Button
 var frenzy_label: Label
+var frenzy_bar: Control
+var frenzy_prog: ProgressBar
 
 
 func _safe_margins() -> Array:
@@ -2201,12 +2212,6 @@ func _build_ui() -> void:
 	btn_snap = _button("", "", 52, Icons.angle(40))
 	btn_snap.pressed.connect(_cycle_snap)
 	tr.add_child(btn_snap)
-	frenzy_label = _label("")
-	frenzy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	frenzy_label.add_theme_color_override("font_color", GameData.C_GOLD)
-	frenzy_label.add_theme_font_override("font", GameData.font_bold)
-	frenzy_label.visible = false
-	tv.add_child(frenzy_label)
 	top_bar.resized.connect(_on_bars_resized)
 
 	# --- нижняя панель: выбор шара, сброс, прокачка
@@ -2237,6 +2242,49 @@ func _build_ui() -> void:
 	bup.pressed.connect(_show_upgrades.bind(true))
 	br.add_child(bup)
 	bottom_bar.resized.connect(_on_bars_resized)
+
+	# --- полоска «золотой лихорадки» под верхней панелью: убывает, поверх — надпись с таймером.
+	# Не влияет на раскладку (камера не прыгает) и лежит ПОД окном прокачки.
+	frenzy_bar = Control.new()
+	frenzy_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frenzy_bar.anchor_right = 1.0
+	frenzy_bar.custom_minimum_size.y = 30
+	frenzy_bar.visible = false
+	ui_root.add_child(frenzy_bar)
+	frenzy_prog = ProgressBar.new()
+	frenzy_prog.show_percentage = false
+	frenzy_prog.max_value = 1.0
+	frenzy_prog.set_anchors_preset(Control.PRESET_FULL_RECT)
+	frenzy_prog.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(1.0, 0.78, 0.2, 0.9)
+	fill.set_corner_radius_all(8)
+	frenzy_prog.add_theme_stylebox_override("fill", fill)
+	var bgb := StyleBoxFlat.new()
+	bgb.bg_color = Color(0, 0, 0, 0.45)
+	bgb.set_corner_radius_all(8)
+	frenzy_prog.add_theme_stylebox_override("background", bgb)
+	frenzy_bar.add_child(frenzy_prog)
+	frenzy_label = _label("")
+	frenzy_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	frenzy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	frenzy_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	frenzy_label.add_theme_font_override("font", GameData.font_bold)
+	frenzy_label.add_theme_font_size_override("font_size", 17)
+	frenzy_label.add_theme_color_override("font_color", Color(0.12, 0.08, 0.0))
+	frenzy_bar.add_child(frenzy_label)
+
+	# --- всплывающее сообщение — тоже под окном прокачки
+	toast = PanelContainer.new()
+	toast.theme_type_variation = "Card"
+	toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	toast.anchor_left = 0.5
+	toast.anchor_right = 0.5
+	toast.anchor_top = 0.28
+	toast.anchor_bottom = 0.28
+	toast.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	toast.visible = false
+	ui_root.add_child(toast)
 
 	# --- окно прокачки: полупрозрачное, игра под ним идёт
 	upg = Control.new()
@@ -2299,22 +2347,11 @@ func _build_ui() -> void:
 		ts.target = sc
 		upg.add_child(ts)
 	tabs.set_tab_title(0, tr("  Шарики  "))
-	tabs.set_tab_title(1, tr("  Перки  "))
+	tabs.set_tab_title(1, tr("  Умения  "))
 	var bclose := _button(tr("Вернуться к игре"), "AccentButton", 60)
 	bclose.pressed.connect(_show_upgrades.bind(false))
 	uv.add_child(bclose)
 
-	# --- всплывающее сообщение
-	toast = PanelContainer.new()
-	toast.theme_type_variation = "Card"
-	toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	toast.anchor_left = 0.5
-	toast.anchor_right = 0.5
-	toast.anchor_top = 0.28
-	toast.anchor_bottom = 0.28
-	toast.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	toast.visible = false
-	ui_root.add_child(toast)
 	toast_label = _label("")
 	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	toast.add_child(toast_label)
@@ -2335,6 +2372,12 @@ func _on_bars_resized() -> void:
 		return
 	top_h = top_bar.size.y
 	bottom_h = bottom_bar.size.y
+	if frenzy_bar != null:
+		var m := _safe_margins()
+		frenzy_bar.offset_left = m[0]
+		frenzy_bar.offset_right = -m[2]
+		frenzy_bar.offset_top = top_h + 6.0
+		frenzy_bar.offset_bottom = top_h + 36.0
 	_update_zoom_limits()
 	if not cam_ready and top_h > 0.0 and bottom_h > 0.0:
 		cam_ready = true
@@ -2399,25 +2442,6 @@ func _rebuild_rows() -> void:
 	chip_group = ButtonGroup.new()
 	if not GameData.unlocked[selected]:
 		selected = "basic"
-
-	# «Мастерство» — вечная трата U, первая карточка вкладки перков
-	var mc := PanelContainer.new()
-	mc.theme_type_variation = "Card"
-	perk_box.add_child(mc)
-	var mv := VBoxContainer.new()
-	mv.add_theme_constant_override("separation", 8)
-	mc.add_child(mv)
-	var mh := HBoxContainer.new()
-	mh.add_theme_constant_override("separation", 10)
-	mv.add_child(mh)
-	mh.add_child(_icon_rect(ic_gem, 32))
-	mh.add_child(_label(tr("Мастерство"), "Title"))
-	var md := _label(tr("+10% урона всех шаров за уровень, без предела"), "Muted")
-	md.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	mv.add_child(md)
-	mastery_btn = _button("", "AccentButton", 54, ic_gem)
-	mastery_btn.pressed.connect(_mastery_up)
-	mv.add_child(mastery_btn)
 
 	for t in GameData.TYPE_ORDER:
 		var def: Dictionary = GameData.TYPES[t]
@@ -2484,9 +2508,9 @@ func _rebuild_rows() -> void:
 			}
 		else:
 			card.modulate = Color(1, 1, 1, 0.6)
-			extra.text = tr("открывается во вкладке «Перки»")
+			extra.text = tr("Откройте в «Наследии»")
 
-		# --- карточка перков
+		# --- дерево умений: основа → две ветки по 3 узла → суперспособность
 		var pc := PanelContainer.new()
 		pc.theme_type_variation = "Card"
 		perk_box.add_child(pc)
@@ -2494,34 +2518,42 @@ func _rebuild_rows() -> void:
 		pv.add_theme_constant_override("separation", 8)
 		pc.add_child(pv)
 		_card_head(pv, t, not unlocked)
-		var d0 := _label(tr(def["desc"]), "Muted")
-		d0.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		pv.add_child(d0)
 		var d1 := _label(tr("«%s» — %s") % [tr(def["perk"]), tr(def["perk_desc"])], "Muted")
 		d1.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		pv.add_child(d1)
 		var d2 := _label(tr("Супер «%s» — %s") % [tr(def["super"]), tr(def["super_desc"])], "Muted")
 		d2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		pv.add_child(d2)
-		var prow := HBoxContainer.new()
-		prow.add_theme_constant_override("separation", 8)
-		pv.add_child(prow)
-		if unlocked:
-			var perk_btn := _button("", "", 54, ic_gem)
-			perk_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			perk_btn.pressed.connect(_perk_up.bind(t))
-			prow.add_child(perk_btn)
-			var sup_btn := _button("", "", 54, ic_gem)
-			sup_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			sup_btn.pressed.connect(_super_up.bind(t))
-			prow.add_child(sup_btn)
-			perk_refs[t] = {"perk": perk_btn, "super": sup_btn}
-		else:
-			var ub := _button("", "AccentButton", 54, ic_gem)
-			ub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			ub.pressed.connect(_unlock.bind(t))
-			prow.add_child(ub)
-			perk_refs[t] = {"unlock": ub}
+		if not unlocked:
+			pv.add_child(_label(tr("Откройте в «Наследии»"), "Muted"))
+			pc.modulate = Color(1, 1, 1, 0.6)
+			continue
+		var nodes := []
+		for k in 8:
+			var nb := _button("", "", 46)
+			nb.add_theme_font_size_override("font_size", 16)
+			nb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			nb.pressed.connect(_tree_buy.bind(t, k))
+			nodes.append(nb)
+		var r0 := HBoxContainer.new()
+		r0.alignment = BoxContainer.ALIGNMENT_CENTER
+		pv.add_child(r0)
+		nodes[0].size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		nodes[0].custom_minimum_size.x = 260
+		r0.add_child(nodes[0])
+		for k in 3:
+			var rr := HBoxContainer.new()
+			rr.add_theme_constant_override("separation", 8)
+			pv.add_child(rr)
+			rr.add_child(nodes[1 + k])
+			rr.add_child(nodes[4 + k])
+		var r4 := HBoxContainer.new()
+		r4.alignment = BoxContainer.ALIGNMENT_CENTER
+		pv.add_child(r4)
+		nodes[7].size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		nodes[7].custom_minimum_size.x = 300
+		r4.add_child(nodes[7])
+		perk_refs[t] = nodes
 	_refresh_ui()
 
 
@@ -2529,7 +2561,7 @@ func _refresh_ui() -> void:
 	if lbl_rub == null:
 		return
 	lbl_rub.text = GameData.fmt(coins)
-	lbl_u.text = str(GameData.u)
+	lbl_u.text = str(run_u)
 	var frac := float(destroyed) / maxf(1.0, float(goal))
 	prog_bar.value = minf(1.0, frac)
 	if track_all:
@@ -2541,9 +2573,11 @@ func _refresh_ui() -> void:
 	btn_snap.text = [tr("любой"), tr("45°"), tr("90°")][snap_mode]
 	if frenzy_t > 0.0:
 		frenzy_label.text = tr("Урон ×2 · %d с") % int(ceil(frenzy_t))
-		frenzy_label.visible = true
-	elif frenzy_label.visible:
-		frenzy_label.visible = false
+		frenzy_prog.max_value = frenzy_max
+		frenzy_prog.value = frenzy_t
+		frenzy_bar.visible = true
+	elif frenzy_bar.visible:
+		frenzy_bar.visible = false
 	for t in chips:
 		# цена следующего шара прямо на фишке; не хватает денег — фишка тусклее
 		var price := _ball_cost(t)
@@ -2563,7 +2597,7 @@ func _refresh_ui() -> void:
 	if not upg.visible:
 		return
 	upg_rub.text = GameData.fmt(coins)
-	upg_u.text = str(GameData.u)
+	upg_u.text = str(run_u)
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
 		r["extra"].text = tr("шаров на карте: %d") % counts[t]
@@ -2588,26 +2622,23 @@ func _refresh_ui() -> void:
 			r["spd"]["button"].text = GameData.fmt(scost)
 			r["spd"]["button"].disabled = coins < scost
 
-	var mcost := GameData.mastery_cost()
-	mastery_btn.text = tr("Уровень %d → %d · %d") % [GameData.mastery, GameData.mastery + 1, mcost]
-	mastery_btn.disabled = GameData.u < mcost
+	var roman := ["I", "II", "III"]
 	for t in perk_refs:
-		var r: Dictionary = perk_refs[t]
-		if r.has("unlock"):
-			var uc := int(GameData.TYPES[t]["unlock_u"])
-			r["unlock"].text = tr("Открыть · %d") % uc
-			r["unlock"].disabled = GameData.u < uc
-			continue
-		var lvl := int(GameData.perks[t])
-		if lvl >= GameData.PERK_MAX:
-			r["perk"].text = tr("Перк %d/%d") % [lvl, GameData.PERK_MAX]
-			r["perk"].disabled = true
-		else:
-			r["perk"].text = tr("Перк %d/%d · %d") % [lvl, GameData.PERK_MAX, lvl + 1]
-			r["perk"].disabled = GameData.u < lvl + 1
-		if GameData.supers[t]:
-			r["super"].text = tr("Супер есть")
-			r["super"].disabled = true
-		else:
-			r["super"].text = tr("Супер · %d") % GameData.SUPER_COST
-			r["super"].disabled = GameData.u < GameData.SUPER_COST
+		var nodes: Array = perk_refs[t]
+		var def: Dictionary = GameData.TYPES[t]
+		for k in 8:
+			var name := ""
+			if k == 0:
+				name = tr("Основа")
+			elif k <= 3:
+				name = "«%s» %s" % [tr(def["perk"]), roman[k - 1]]
+			elif k <= 6:
+				name = "%s %s" % [tr("Скорость"), roman[k - 4]]
+			else:
+				name = "★ «%s»" % tr(def["super"])
+			var owned: bool = tree[t][k]
+			var btn: Button = nodes[k]
+			btn.text = name if owned else "%s · %d" % [name, TREE_COST[k]]
+			btn.icon = null if owned else ic_gem
+			btn.theme_type_variation = "AccentButton" if owned else ""
+			btn.disabled = not owned and not _tree_can_buy(t, k)

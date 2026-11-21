@@ -60,6 +60,7 @@ func new_game(map_index: int, setup: Callable = Callable()):
 	seed(12345)
 	game = GAME.instantiate()
 	add_child(game)
+	_apply_tree(game)
 	await get_tree().process_frame
 	return game
 
@@ -70,11 +71,32 @@ func _free_game() -> void:
 		game = null
 
 
+var _pending_tree := -1   # заполнить деревья умений после создания уровня (unlock_all)
+var _pending_super := false
+
+
+## Открыть все типы шаров («Наследие») и после создания уровня заполнить деревья умений:
+## perk 2/4/5 → 1/2/3 узла ветки умения; sup → всё дерево, включая суперспособность.
 func unlock_all(perk: int = 0, sup: bool = false) -> void:
+	for t in ["splash", "sniper", "pierce", "poison"]:
+		GameData.meta[t] = 1
+	GameData.refresh_unlocked()
+	_pending_tree = perk
+	_pending_super = sup
+
+
+func _apply_tree(g) -> void:
+	if _pending_tree < 0:
+		return
 	for t in GameData.TYPE_ORDER:
-		GameData.unlocked[t] = true
-		GameData.perks[t] = perk
-		GameData.supers[t] = sup
+		var n: int = 0 if _pending_tree <= 0 else (1 if _pending_tree < 4 else (2 if _pending_tree < 5 else 3))
+		var arr := [n > 0 or _pending_super, n >= 1, n >= 2, n >= 3, _pending_super, _pending_super, _pending_super, _pending_super]
+		if _pending_super:
+			arr = [true, true, true, true, true, true, true, true]
+		g.tree[t] = arr
+	g._recalc_stats()
+	_pending_tree = -1
+	_pending_super = false
 
 
 func fire_n(g, t: String, n: int) -> void:
@@ -448,6 +470,12 @@ func test_translations_complete() -> void:
 		keys[mp["name"]] = "maps.gd"
 	for th in preload("res://scripts/maps.gd").THEMES:
 		keys[th["name"]] = "maps.gd (темы)"
+	for br in GameData.META_BRANCHES:
+		keys[br] = "game_data.gd (ветки)"
+	for m in GameData.META:
+		if m.has("name"):
+			keys[m["name"]] = "game_data.gd (Наследие)"
+			keys[m["desc"]] = "game_data.gd (Наследие)"
 	check(I18n.LANGS.size() >= 16, "языков меньше 16")
 	for code in I18n.LANGS:
 		if code == "ru":
@@ -531,6 +559,12 @@ func test_foreign_ui() -> void:
 		menu._show_settings(true)
 		await get_tree().process_frame
 		var bad3 := []
+		_cyrillic_texts(menu, bad3)
+		menu._show_screen("legacy")
+		await get_tree().process_frame
+		_cyrillic_texts(menu, bad3)
+		menu._show_screen("profiles")
+		await get_tree().process_frame
 		_cyrillic_texts(menu, bad3)
 		menu.queue_free()
 		check(bad2.is_empty(), "%s: русский текст в меню: %s" % [code, str(bad2)])
@@ -620,7 +654,7 @@ func test_gesture_hold_vs_pan() -> void:
 	check(not g.sling and g.balls.size() == 1, "короткое касание что-то сделало")
 
 
-## Язык по умолчанию — язык системы: русский для русской системы, для любой другой — английский.
+## Язык по умолчанию — язык системы; выбор хранится в общих настройках, старый ключ "lang" игнорируется.
 func test_default_language() -> void:
 	for pair in [["ru", "ru"], ["ru_RU", "ru"], ["en", "en"], ["en_US", "en"], ["de_DE", "de"], ["es_MX", "es"],
 			["pt_PT", "pt_BR"], ["pt_BR", "pt_BR"], ["zh_TW", "zh_CN"], ["zh", "zh_CN"], ["ja", "ja"], ["ar_EG", "ar"],
@@ -630,19 +664,14 @@ func test_default_language() -> void:
 	GameData.lang_choice = ""
 	GameData.apply_settings()
 	check(GameData.lang == GameData.system_lang(OS.get_locale()), "без выбора язык не системный")
-	# выбор игрока сохраняется и побеждает систему; старый автоматический ключ "lang" игнорируется
 	GameData.lang_choice = "en"
-	GameData.save_game()
+	GameData.save_settings()
 	GameData.lang_choice = ""
-	GameData.load_game()
-	check(GameData.lang_choice == "en", "выбранный язык не сохранился")
-	var f := FileAccess.open(GameData.SAVE_PATH, FileAccess.WRITE)
-	f.store_string(JSON.stringify({"u": 0, "lang": "ru"}))
-	f.close()
-	GameData.load_game()
-	check(GameData.lang_choice == "", "старое автоматическое значение языка считается выбором игрока")
+	GameData.load_settings()
+	check(GameData.lang_choice == "en", "выбранный язык не сохранился в общих настройках")
 	GameData.lang_choice = keep
 	GameData.apply_settings()
+	GameData.save_settings()
 
 
 ## Старое сохранение (до v0.14), где монеты назывались "rubles", загружается без потери денег.
@@ -848,17 +877,18 @@ func test_redraw_throttle() -> void:
 	check(per_chunk_frames <= 12.0, "кусок перерисовывается %.1f раз за 60 кадров (больше 10/с)" % per_chunk_frames)
 
 
-## Повреждённый save.json (неверные типы полей) не роняет игру и не даёт мусорных значений.
+## Повреждённый save.json профиля (неверные типы полей) не роняет игру и не даёт мусорных значений.
 func test_corrupt_global_save() -> void:
-	var f := FileAccess.open(GameData.SAVE_PATH, FileAccess.WRITE)
-	f.store_string(JSON.stringify({"u": "много", "unlocked": [1, 2], "perks": {"basic": 99}, "maps_unlocked": -5,
-		"maps_done": "x", "map_states": 7, "lang_choice": "de"}))
-	f.close()
+	GameData.write_atomic(GameData.save_path(), JSON.stringify({"stars": "много", "meta": [1, 2],
+		"maps_unlocked": -5, "maps_done": "x", "map_states": 7}))
 	GameData.load_game()
-	check(GameData.u == 0, "u из строки: %s" % str(GameData.u))
-	check(GameData.perks["basic"] == GameData.PERK_MAX, "перк не ограничен максимумом: %d" % GameData.perks["basic"])
-	check(GameData.maps_unlocked >= 1, "открытых карт меньше одной")
+	check(GameData.stars == 0, "звёзды из строки: %s" % str(GameData.stars))
+	check(GameData.meta.is_empty(), "«Наследие» из мусора: %s" % str(GameData.meta))
+	check(GameData.maps_unlocked >= 1, "открытых уровней меньше одного")
 	check(typeof(GameData.map_states) == TYPE_DICTIONARY and typeof(GameData.maps_done) == TYPE_DICTIONARY, "словари из мусора")
+	GameData.write_atomic(GameData.save_path(), JSON.stringify({"stars": 3, "meta": {"frenzy": 99, "sniper": 7}}))
+	GameData.load_game()
+	check(GameData.meta_level("frenzy") == 5 and GameData.meta_level("sniper") == 1, "уровни «Наследия» не ограничены максимумом")
 	GameData.reset_all()
 
 
@@ -942,11 +972,11 @@ func test_damage_milestones() -> void:
 		check(g._damage_of("basic") == int(base * pair[1]), "урон на ур.%d: %d, а не %d" % [pair[0], g._damage_of("basic"), int(base * pair[1])])
 
 
-## Постоянный бонус монет за выполненные цели карт.
+## Бонус монет из «Наследия»: +10% за уровень «Бонуса монет».
 func test_coin_bonus() -> void:
 	var g = await new_game(2, func():
-		GameData.maps_done = {"meadow": true, "heart": true})
-	check(is_equal_approx(g.coin_mult, 1.5), "бонус за 2 карты %.2f, а не 1.5" % g.coin_mult)
+		GameData.meta = {"coin_bonus": 5})
+	check(is_equal_approx(g.coin_mult, 1.5), "бонус за 5 уровней %.2f, а не 1.5" % g.coin_mult)
 	var id := -1
 	for y in g.H:
 		for x in g.W:
@@ -1032,22 +1062,33 @@ func test_menu_endless() -> void:
 	GameData.reset_all()
 
 
-## «Мастерство»: бесконечная трата U, +10% урона всем шарам за уровень, сохраняется.
-func test_mastery() -> void:
-	var g = await new_game(2)
-	var d0: int = g._damage_of("splash")
-	GameData.u = 100
-	g._mastery_up()
-	check(GameData.mastery == 1 and GameData.u == 95, "мастерство не купилось за 5 U")
-	g._mastery_up()
-	check(GameData.mastery == 2 and GameData.u == 88, "второй уровень мастерства стоил не 7 U")
-	check(g._damage_of("splash") == int(round(d0 * 1.2)), "урон с мастерством 2: %d, а не %d" % [g._damage_of("splash"), int(round(d0 * 1.2))])
+## «Наследие»: цепочки, цена, максимум, звёзды; эффекты на старте уровня.
+func test_legacy() -> void:
+	GameData.reset_all()
+	GameData.stars = 30
+	check(not GameData.meta_buy("sniper"), "«Снайпер» открылся без «Бомбы» (цепочка)")
+	check(GameData.meta_buy("splash") and GameData.stars == 29, "«Бомба» не открылась за 1 ★")
+	check(GameData.unlocked["splash"], "после покупки «Бомба» не открыта")
+	check(GameData.meta_buy("coin_bonus") and GameData.meta_cost("coin_bonus") == 2, "цена «Бонуса монет» не растёт")
+	check(GameData.meta_buy("start_coins"), "«Стартовые монеты» не купились после «Бонуса монет»")
+	check(GameData.meta_buy("start_balls") and GameData.meta_buy("dmg_bonus"), "не купились «Стартовые шары» и «Урон»")
+	GameData.stars = 100
+	for k in 7:
+		GameData.meta_buy("start_balls")
+	check(GameData.meta_level("start_balls") == 5, "превышен максимум «Стартовых шаров»")
 	GameData.save_game()
-	GameData.mastery = 0
+	var lv: Dictionary = GameData.meta.duplicate()
 	GameData.load_game()
-	check(GameData.mastery == 2, "мастерство не сохранилось")
-	GameData.mastery = 1000
-	check(GameData.mastery_cost() > 0 and g._damage_of("basic") > 0, "мастерство 1000 сломало числа")
+	check(GameData.meta == lv, "«Наследие» не сохранилось")
+	# эффекты на старте уровня
+	GameData.meta["start_u"] = 2
+	GameData.meta["u_find"] = 1
+	var keep := GameData.meta.duplicate()
+	var g = await new_game(2, func(): GameData.meta = keep.duplicate(); GameData.refresh_unlocked())
+	check(g.balls.size() == 6, "стартовых шаров %d, а должно быть 6" % g.balls.size())
+	check(g.coins == 90, "стартовых монет %d, а должно быть 90" % g.coins)
+	check(g.run_u == 2, "стартовых U %d, а должно быть 2" % g.run_u)
+	check(is_equal_approx(GameData.dmg_mult(), 1.1), "«Урон» не дал +10%")
 
 
 ## Раскладки картинок — узоры, а не россыпь: в кольце один мотив, левая половина зеркальная, детерминировано.
@@ -1122,18 +1163,21 @@ func test_vibration_and_settings() -> void:
 	g._hold_tick(0.3)
 	g._press_cancel()
 	check(GameData.vibrations == v0 + 1, "вибрация при выключенной настройке")
-	GameData.music_on = false
-	GameData.sfx_on = false
-	GameData.save_game()
-	GameData.music_on = true
-	GameData.sfx_on = true
+	GameData.music_vol = 0.0
+	GameData.sfx_vol = 0.35
+	GameData.save_settings()
+	GameData.music_vol = 0.8
+	GameData.sfx_vol = 0.8
 	GameData.vibration_on = true
-	GameData.load_game()
-	check(not GameData.music_on and not GameData.sfx_on and not GameData.vibration_on, "настройки звука/вибрации не сохранились")
-	GameData.music_on = true
-	GameData.sfx_on = true
+	GameData.load_settings()
+	GameData.apply_settings()
+	check(not GameData.music_on and is_equal_approx(GameData.sfx_vol, 0.35) and not GameData.vibration_on,
+		"громкость/вибрация не сохранились в общих настройках")
+	GameData.music_vol = 0.8
+	GameData.sfx_vol = 0.8
 	GameData.vibration_on = true
-	GameData.save_game()
+	GameData.apply_settings()
+	GameData.save_settings()
 
 
 ## Граница карты и сетка в тумане: слои есть и перерисовываются при движении камеры.
@@ -1164,3 +1208,82 @@ func test_whole_map_visible() -> void:
 	var ver: Label = menu.find_child("Version", true, false)
 	check(ver != null and ver.text.begins_with("v"), "в меню нет номера версии")
 	menu.queue_free()
+
+
+
+## Дерево умений шара: покупается за U уровня, ветки по порядку, суперспособность — после обеих веток.
+func test_skill_tree() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	g.run_u = 100
+	check(not g._tree_can_buy("splash", 1), "узел ветки куплен без основы")
+	g._tree_buy("splash", 0)
+	check(g.tree["splash"][0] and g.run_u == 99, "основа не купилась за 1 U")
+	var d0: int = g._damage_of("basic")
+	g._tree_buy("basic", 0)
+	check(g._damage_of("basic") == int(round(d0 * 1.2)) or g._damage_of("basic") == maxi(1, int(round(d0 * 1.2))), "основа не дала +20% урона")
+	g._tree_buy("splash", 1)
+	g._tree_buy("splash", 2)
+	check(g._perk_lvl("splash") == 4, "два узла ветки умения дали уровень %d, а не 4" % g._perk_lvl("splash"))
+	g._tree_buy("splash", 3)
+	check(not g._tree_can_buy("splash", 7), "суперспособность доступна без ветки скорости")
+	var s0: float = g._speed("splash")
+	for k in [4, 5, 6]:
+		g._tree_buy("splash", k)
+	check(is_equal_approx(g._speed("splash"), s0 * 1.3), "ветка скорости не дала +30%")
+	g._tree_buy("splash", 7)
+	check(g.st_sup[1] == 1, "суперспособность не включилась")
+	# дерево сохраняется с уровнем, а новый уровень начинается с пустым деревом
+	g._save_state()
+	var u_left: int = g.run_u
+	game.queue_free()
+	game = null
+	await get_tree().process_frame
+	game = GAME.instantiate()
+	add_child(game)
+	check(game.tree["splash"] == [true, true, true, true, true, true, true, true] and game.run_u == u_left,
+		"дерево или U уровня не сохранились")
+	var g2 = await new_game(3, func(): unlock_all())
+	check(not g2.tree["splash"].has(true), "на новом уровне дерево не сброшено")
+
+
+## Профили: прогресс раздельный, настройки общие, удаление чистит только свой профиль.
+func test_profiles() -> void:
+	GameData.select_slot(1)
+	GameData.reset_all()
+	GameData.stars = 7
+	GameData.maps_done = {"meadow": true}
+	GameData.save_game()
+	GameData.select_slot(2)
+	check(GameData.stars == 0 and GameData.maps_done.is_empty(), "второй профиль не пустой")
+	GameData.stars = 3
+	GameData.save_game()
+	check(GameData.slot_summary(1)["stars"] == 7 and GameData.slot_summary(2)["stars"] == 3, "сводки профилей перепутаны")
+	GameData.music_vol = 0.4
+	GameData.save_settings()
+	GameData.select_slot(1)
+	check(GameData.stars == 7 and is_equal_approx(GameData.music_vol, 0.4), "профиль 1 не восстановился или настройки не общие")
+	GameData.delete_slot(2)
+	check(GameData.slot_summary(2).is_empty() and GameData.slot_summary(1)["stars"] == 7, "удаление задело чужой профиль")
+	GameData.music_vol = 0.8
+	GameData.save_settings()
+	GameData.reset_all()
+
+
+## Старое сохранение (один профиль в корне) переносится в профиль 1: пройденные карты → ★, типы шаров открыты.
+func test_migration() -> void:
+	GameData.write_atomic("user://save.json", JSON.stringify({"u": 40, "unlocked": {"basic": true, "splash": true, "sniper": true},
+		"maps_done": {"meadow": true, "heart": true, "garden": true}, "maps_unlocked": 4, "mastery": 3,
+		"lang_choice": "de", "music_on": false}))
+	GameData._migrate_old_save()
+	GameData.load_settings()
+	GameData.load_game()
+	check(GameData.stars == 3 + 4 + 5 + 3, "звёзд после переноса %d, а должно быть 15" % GameData.stars)
+	check(GameData.unlocked["splash"] and GameData.unlocked["sniper"] and not GameData.unlocked["pierce"], "открытые типы не перенеслись")
+	check(GameData.maps_unlocked == 4 and GameData.maps_done.size() == 3, "пройденные уровни не перенеслись")
+	check(GameData.lang_choice == "de" and GameData.music_vol == 0.0, "настройки не перенеслись")
+	check(not FileAccess.file_exists("user://save.json"), "старый файл не удалён")
+	GameData.lang_choice = "ru"
+	GameData.music_vol = 0.8
+	GameData.apply_settings()
+	GameData.save_settings()
+	GameData.reset_all()

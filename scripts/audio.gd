@@ -44,8 +44,13 @@ func _ensure_bus(name: String, db: float) -> void:
 
 ## Применить настройки: музыка и звуки включаются/выключаются.
 func apply() -> void:
-	AudioServer.set_bus_mute(AudioServer.get_bus_index("Music"), not GameData.music_on)
-	AudioServer.set_bus_mute(AudioServer.get_bus_index("SFX"), not GameData.sfx_on)
+	# громкость: ползунок 0..1 поверх базового уровня шины; 0 — выключено
+	var mi := AudioServer.get_bus_index("Music")
+	var si := AudioServer.get_bus_index("SFX")
+	AudioServer.set_bus_volume_db(mi, -8.0 + linear_to_db(maxf(GameData.music_vol, 0.001)))
+	AudioServer.set_bus_volume_db(si, -2.0 + linear_to_db(maxf(GameData.sfx_vol, 0.001)))
+	AudioServer.set_bus_mute(mi, not GameData.music_on)
+	AudioServer.set_bus_mute(si, not GameData.sfx_on)
 	if GameData.music_on and not music.playing:
 		music.play()
 	elif not GameData.music_on and music.playing:
