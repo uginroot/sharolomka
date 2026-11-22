@@ -299,7 +299,7 @@ func _run() -> void:
 	var bar_set := sc_set.get_v_scroll_bar()
 	print("    настройки: содержимое %.0f, видно %.0f" % [bar_set.max_value, bar_set.page])
 	check(_find(mset, "Вкл") != null, "в настройках есть переключатели")
-	check(mset.settings_box.find_children("*", "HSlider", true, false).size() == 2, "в настройках два ползунка громкости")
+	check(mset.settings_box.find_children("*", "HSlider", true, false).size() == 3, "в настройках три ползунка: музыка, звуки, залипание")
 	check(await _tap("English"), "в настройках можно выбрать English")
 	await _wait(1.0)
 	check(GameData.lang == "en", "язык переключился на английский")
