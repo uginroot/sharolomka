@@ -1377,3 +1377,19 @@ func test_key_angle_snap() -> void:
 	check(GameData.magnet_deg == 4, "ширина притяжения не сохранилась")
 	GameData.magnet_deg = 2
 	GameData.save_settings()
+
+
+
+## «Не блокировать экран»: сохраняется в общих настройках и применяется заново при возвращении в игру.
+func test_keep_screen() -> void:
+	GameData.keep_screen = true
+	GameData.save_settings()
+	GameData.keep_screen = false
+	GameData.load_settings()
+	check(GameData.keep_screen, "настройка «Не блокировать экран» не сохранилась")
+	var n0: int = GameData.keep_on_applied
+	GameData._notification(NOTIFICATION_APPLICATION_RESUMED)
+	check(GameData.keep_on_applied == n0 + 1, "при возвращении в игру флаг не применён заново")
+	GameData.keep_screen = false
+	GameData.save_settings()
+	GameData.apply_settings()

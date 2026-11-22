@@ -13,8 +13,6 @@ const T := {
 	"Как в системе": "System",
 	"Экономия батареи": "Battery saver",
 	"30 кадров в секунду вместо 60": "30 frames per second instead of 60",
-	"Не гасить экран": "Keep screen on",
-	"Пока открыта игра": "While the game is open",
 	"Вкл": "On",
 	"Выкл": "Off",
 	"Сбросить весь прогресс": "Reset all progress",
@@ -141,4 +139,6 @@ const T := {
 	"ключевые": "key",
 	"Залипание к ключевым углам": "Snap to key angles",
 	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "In “key” mode the aim snaps to multiples of 45° when it is closer than this",
+	"Не блокировать экран": "Don't lock the screen",
+	"Пока игра открыта, экран не затемняется и телефон не блокируется": "While the game is open, the screen won't dim and the phone won't lock",
 }

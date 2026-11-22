@@ -13,8 +13,6 @@ const T := {
 	"Как в системе": "Système",
 	"Экономия батареи": "Économie de batterie",
 	"30 кадров в секунду вместо 60": "30 images par seconde au lieu de 60",
-	"Не гасить экран": "Écran toujours allumé",
-	"Пока открыта игра": "Pendant que le jeu est ouvert",
 	"Вкл": "Oui",
 	"Выкл": "Non",
 	"Сбросить весь прогресс": "Réinitialiser toute la progression",
@@ -141,4 +139,6 @@ const T := {
 	"ключевые": "clés",
 	"Залипание к ключевым углам": "Aimant des angles clés",
 	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "En mode « clés », la visée s’aimante aux multiples de 45° si elle en est plus proche que ceci",
+	"Не блокировать экран": "Ne pas verrouiller l’écran",
+	"Пока игра открыта, экран не затемняется и телефон не блокируется": "Tant que le jeu est ouvert, l’écran ne s’assombrit pas et le téléphone ne se verrouille pas",
 }

@@ -13,8 +13,6 @@ const T := {
 	"Как в системе": "Del sistema",
 	"Экономия батареи": "Ahorro de batería",
 	"30 кадров в секунду вместо 60": "30 fotogramas por segundo en vez de 60",
-	"Не гасить экран": "Pantalla siempre encendida",
-	"Пока открыта игра": "Mientras el juego está abierto",
 	"Вкл": "Sí",
 	"Выкл": "No",
 	"Сбросить весь прогресс": "Borrar todo el progreso",
@@ -141,4 +139,6 @@ const T := {
 	"ключевые": "clave",
 	"Залипание к ключевым углам": "Ajuste a ángulos clave",
 	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "En el modo «clave» la mira se ajusta a múltiplos de 45° si está más cerca que esto",
+	"Не блокировать экран": "No bloquear la pantalla",
+	"Пока игра открыта, экран не затемняется и телефон не блокируется": "Mientras el juego está abierto, la pantalla no se atenúa y el teléfono no se bloquea",
 }

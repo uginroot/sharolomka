@@ -69,6 +69,7 @@ var sfx_on := true           # = sfx_vol > 0
 var vibration_on := true     # мини-вибрация при начале прицеливания
 var magnet_deg := 2          # режим «ключевые»: притяжение к углам, кратным 45°, в пределах ±N° (1–5)
 var vibrations := 0          # счётчик вибраций — для тестов
+var keep_on_applied := 0     # сколько раз заново применялся «не блокировать экран» — для тестов
 var lang := "ru"             # действующий язык интерфейса
 var lang_choice := ""        # выбор игрока; пусто — как в системе
 
@@ -245,6 +246,10 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
 		if _save_pending:
 			save_game()
+	elif what == NOTIFICATION_APPLICATION_RESUMED or what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		# флаг «не гасить экран» на некоторых телефонах сбрасывается после сворачивания — включаем заново
+		DisplayServer.screen_set_keep_on(keep_screen)
+		keep_on_applied += 1
 
 
 func save_game() -> void:

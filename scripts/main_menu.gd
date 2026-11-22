@@ -451,7 +451,7 @@ func _fill_settings() -> void:
 	mg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_setting_block(tr("Залипание к ключевым углам"), tr("В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого"), mgr)
 	_setting_row(tr("Экономия батареи"), tr("30 кадров в секунду вместо 60"), _toggle(GameData.eco_mode, _toggle_eco))
-	_setting_row(tr("Не гасить экран"), tr("Пока открыта игра"), _toggle(GameData.keep_screen, _toggle_screen))
+	_setting_row(tr("Не блокировать экран"), tr("Пока игра открыта, экран не затемняется и телефон не блокируется"), _toggle(GameData.keep_screen, _toggle_screen))
 	# язык: «Как в системе» + кнопки с названиями языков на них самих
 	var langs := GridContainer.new()
 	langs.columns = 2   # крупный шрифт: в три колонки длинные названия обрезались

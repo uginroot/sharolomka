@@ -13,8 +13,6 @@ const T := {
 	"Как в системе": "Sistem",
 	"Экономия батареи": "Pil tasarrufu",
 	"30 кадров в секунду вместо 60": "60 yerine saniyede 30 kare",
-	"Не гасить экран": "Ekranı açık tut",
-	"Пока открыта игра": "Oyun açıkken",
 	"Вкл": "Açık",
 	"Выкл": "Kapalı",
 	"Сбросить весь прогресс": "Tüm ilerlemeyi sıfırla",
@@ -141,4 +139,6 @@ const T := {
 	"ключевые": "anahtar",
 	"Залипание к ключевым углам": "Anahtar açılara yapışma",
 	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "“Anahtar” modunda nişan, bundan daha yakınsa 45°'nin katlarına yapışır",
+	"Не блокировать экран": "Ekranı kilitleme",
+	"Пока игра открыта, экран не затемняется и телефон не блокируется": "Oyun açıkken ekran kararmaz ve telefon kilitlenmez",
 }

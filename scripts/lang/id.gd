@@ -13,8 +13,6 @@ const T := {
 	"Как в системе": "Sistem",
 	"Экономия батареи": "Hemat baterai",
 	"30 кадров в секунду вместо 60": "30 frame per detik, bukan 60",
-	"Не гасить экран": "Layar tetap menyala",
-	"Пока открыта игра": "Selama game terbuka",
 	"Вкл": "Aktif",
 	"Выкл": "Mati",
 	"Сбросить весь прогресс": "Hapus semua progres",
@@ -141,4 +139,6 @@ const T := {
 	"ключевые": "kunci",
 	"Залипание к ключевым углам": "Tarik ke sudut kunci",
 	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "Dalam mode “kunci”, bidikan menempel ke kelipatan 45° jika lebih dekat dari ini",
+	"Не блокировать экран": "Jangan kunci layar",
+	"Пока игра открыта, экран не затемняется и телефон не блокируется": "Selama game terbuka, layar tidak meredup dan ponsel tidak terkunci",
 }
