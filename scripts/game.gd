@@ -33,6 +33,7 @@ const WALL_DARK := Color(0.6, 0.64, 0.74)
 const WALL_SEAM := Color(0.8, 0.83, 0.9)
 const GRID := Color(1, 1, 1, 0.055)
 const FOG_GRID := Color(1, 1, 1, 0.03)       # сетка в тумане — ещё прозрачнее
+const FOG_EDGE := 0.55                        # яркость мягкого края тумана у открытых клеток
 const OUTSIDE := Color(0.03, 0.035, 0.05)     # за пределами карты — темнее тумана
 const BORDER := Color(0.55, 0.68, 1.0, 0.85)  # граница карты
 const SLING_R := 230.0          # радиус области наведения рогатки, px экрана
@@ -115,6 +116,7 @@ var completed := false
 
 # ---- отрисовка
 var field_root: Node2D
+var fog_builds := 0              # сколько раз пересчитывался край тумана — для тестов
 var frame_node: Node2D           # сетка в тумане и затемнение за картой (под кусками)
 var border_node: Node2D          # граница карты (над кусками)
 var _frame_key := Vector3.ZERO
@@ -688,6 +690,18 @@ func _reveal(x: int, y: int) -> void:
 				c.blob_dirty = true
 				_ensure_node(ck)
 				_mark(ck)
+				c.fog_dirty = true
+				# клетка у края куска освещает туман соседнего куска — его тоже перерисовать
+				if (xx & 31) <= 1 or (xx & 31) >= 30 or (yy & 31) <= 1 or (yy & 31) >= 30:
+					for oy in range(-2, 3):
+						for ox in range(-2, 3):
+							var nx := xx + ox
+							var ny := yy + oy
+							if nx >= 0 and ny >= 0 and nx < W and ny < H:
+								var ck2 := (nx >> 5) + (ny >> 5) * cw
+								if ck2 != ck and chunks[ck2] != null and chunks[ck2].node != null:
+									chunks[ck2].fog_dirty = true
+									_mark(ck2)
 				ex0 = mini(ex0, xx)
 				ex1 = maxi(ex1, xx)
 				ey0 = mini(ey0, yy)
@@ -1508,6 +1522,11 @@ func _draw_chunk(ck: int) -> void:
 					gl.append(Vector2(lx * CELL, ly * CELL))
 					n.draw_multiline(gl, GRID)
 				run = -1
+	if lod <= 1:
+		if c.fog_dirty:
+			_build_fog_edge(c, vis, x0, y0, gw, gh)
+		if not c.fog_idx.is_empty():
+			RenderingServer.canvas_item_add_triangle_array(n.get_canvas_item(), c.fog_idx, c.fog_pts, c.fog_cols)
 	var detail := lod == 0
 	var gap := 1.0 if detail else 0.0
 	# квадраты
@@ -1570,6 +1589,79 @@ func _draw_chunk(ck: int) -> void:
 		n.draw_string(font, Vector2((li & 31) * CELL * 2.0, ((li >> 5) * CELL + CELL * 0.5) * 2.0 + 11.0),
 			GameData.fmt(hp[li]), HORIZONTAL_ALIGNMENT_CENTER, CELL * 2.0, 30, Color(0, 0, 0, 0.85))
 	n.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Мягкий край тумана: скрытые клетки у границы освещены градиентом на 2 клетки — со стороны открытых
+## клеток светлее, дальше плавно уходят в темноту (вместо резкой ступеньки). Что внутри — не видно.
+## Свет считается в вершинах сетки по расстоянию до открытых клеток; весь край куска — один массив
+## треугольников (одна команда отрисовки), без триангуляции на каждую клетку.
+func _build_fog_edge(c, vis: PackedByteArray, x0: int, y0: int, gw: int, gh: int) -> void:
+	c.fog_dirty = false
+	fog_builds += 1
+	# видимость клеток куска с полем в 2 клетки вокруг (соседние куски)
+	var m := 2
+	var ew := gw + 2 * m
+	var eh := gh + 2 * m
+	var ev := PackedByteArray()
+	ev.resize(ew * eh)
+	for ey in eh:
+		for ex in ew:
+			ev[ey * ew + ex] = 1 if _vis_local(vis, x0, y0, ex - m, ey - m) else 0
+	# вершины (gw+1)×(gh+1): 0 — касается открытой клетки, 1 — рядом с такой вершиной, 2 — темно
+	var vw := gw + 3
+	var vh := gh + 3
+	var vd := PackedByteArray()
+	vd.resize(vw * vh)
+	vd.fill(2)
+	for vy in vh:
+		for vx in vw:
+			# вершина (vx-1, vy-1) в координатах куска; клетки вокруг неё в ev — со сдвигом m
+			var cx := vx - 1 + m
+			var cy := vy - 1 + m
+			if ev[(cy - 1) * ew + cx - 1] == 1 or ev[(cy - 1) * ew + cx] == 1 or ev[cy * ew + cx - 1] == 1 or ev[cy * ew + cx] == 1:
+				vd[vy * vw + vx] = 0
+	for vy in range(1, vh - 1):
+		for vx in range(1, vw - 1):
+			if vd[vy * vw + vx] == 0:
+				continue
+			for oy in range(-1, 2):
+				for ox in range(-1, 2):
+					if vd[(vy + oy) * vw + vx + ox] == 0:
+						vd[vy * vw + vx] = 1
+	var lit := [FOG_EDGE, FOG_EDGE * 0.35, 0.0]
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	for ly in gh:
+		for lx in gw:
+			if vis[(ly << 5) | lx] == 1:
+				continue
+			var a0: int = vd[(ly + 1) * vw + lx + 1]
+			var a1: int = vd[(ly + 1) * vw + lx + 2]
+			var a2: int = vd[(ly + 2) * vw + lx + 2]
+			var a3: int = vd[(ly + 2) * vw + lx + 1]
+			if a0 == 2 and a1 == 2 and a2 == 2 and a3 == 2:
+				continue
+			var base := pts.size()
+			var px := lx * CELL
+			var py := ly * CELL
+			pts.append_array([Vector2(px, py), Vector2(px + CELL, py), Vector2(px + CELL, py + CELL), Vector2(px, py + CELL)])
+			cols.append_array([_fog_col(lit[a0]), _fog_col(lit[a1]), _fog_col(lit[a2]), _fog_col(lit[a3])])
+			idx.append_array([base, base + 1, base + 2, base, base + 2, base + 3])
+	c.fog_pts = pts
+	c.fog_cols = cols
+	c.fog_idx = idx
+
+
+func _fog_col(a: float) -> Color:
+	return Color(floor_col.r, floor_col.g, floor_col.b, a)
+
+
+## Видна ли клетка: внутри куска — по его массиву (быстро), за краем куска — через соседний кусок.
+func _vis_local(vis: PackedByteArray, x0: int, y0: int, lx: int, ly: int) -> bool:
+	if lx >= 0 and ly >= 0 and lx < CS and ly < CS:
+		return vis[(ly << 5) | lx] == 1
+	return _vis_at(x0 + lx, y0 + ly)
 
 
 func _build_chunk_tex(c) -> void:

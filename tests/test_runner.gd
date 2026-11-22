@@ -1393,3 +1393,23 @@ func test_keep_screen() -> void:
 	GameData.keep_screen = false
 	GameData.save_settings()
 	GameData.apply_settings()
+
+
+
+## Мягкий край тумана: открытие клетки у края куска перерисовывает соседний кусок (там светится его туман).
+func test_fog_edge_neighbors() -> void:
+	var g = await new_game(2)
+	# соседние куски с узлами по вертикальной границе 32
+	var x := 31
+	var y: int = g.start_cell.y
+	for k in [0, 1]:
+		var ck: int = ((x + k) >> 5) + (y >> 5) * g.cw
+		g._get_chunk(ck)
+		g._ensure_node(ck)
+	var right: int = ((x + 1) >> 5) + (y >> 5) * g.cw
+	g.dirty.clear()
+	var c = g.chunks[(x >> 5) + (y >> 5) * g.cw]
+	c.vis[((y & 31) << 5) | (x & 31)] = 0
+	g._reveal(x - 1, y)   # открывает и клетку x=31 у края куска
+	check(g.dirty.has(right), "соседний кусок не помечен к перерисовке — край тумана там не обновится")
+	check(g.chunks[right].fog_dirty, "у соседнего куска не сброшен кэш края тумана")
