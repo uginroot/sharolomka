@@ -33,7 +33,6 @@ const T := {
 	"Прокачка": "Upgrades",
 	"любой": "any",
 	"45°": "45°",
-	"90°": "90°",
 	"Разбито %d%%": "Broken %d%%",
 	"Разбито %s": "Broken %s",
 	"%s из %s": "%s of %s",
@@ -139,4 +138,7 @@ const T := {
 	"+1 U на старте уровня": "+1 U at level start",
 	"+1 бесплатный шар на старте": "+1 free ball at start",
 	"+20% золотых квадратов": "+20% golden squares",
+	"ключевые": "key",
+	"Залипание к ключевым углам": "Snap to key angles",
+	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "In “key” mode the aim snaps to multiples of 45° when it is closer than this",
 }

@@ -619,10 +619,10 @@ func test_slingshot() -> void:
 	g._sling_move(c + Vector2(5, 5))        # просто касание
 	g._sling_release()
 	check(g.balls.size() == n0 + 1, "короткое касание не стреляет")
-	g.snap_mode = 2
+	g.snap_mode = 1
 	g._sling_begin(c)
 	g._sling_move(c + Vector2(-100, 30))
-	check(is_equal_approx(fposmod(g.aim_angle, 90.0), 0.0), "режим 90° округляет направление")
+	check(is_equal_approx(fposmod(g.aim_angle, 45.0), 0.0), "режим 45° округляет направление")
 	g._sling_abort()
 	# нажатие в туман — выстрела нет
 	var far: Vector2 = c + Vector2(0, -40.0 * 30 * g.zoom)
@@ -1340,4 +1340,40 @@ func test_settings_lang_buttons_fit() -> void:
 		if b.text in GameData.LANG_NAMES.values() or b.text == tr("Как в системе"):
 			var need: float = font.get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x + 20.0
 			check(b.size.x >= need, "кнопка языка «%s» уже текста (%.0f < %.0f)" % [b.text, b.size.x, need])
+	# ни один элемент настроек не выходит за правый край экрана
+	var vw: float = get_viewport().get_visible_rect().size.x
+	for c in menu.settings_box.find_children("*", "Control", true, false):
+		if (c is Button or c is HSlider or c is Label) and c.is_visible_in_tree():
+			check(c.get_global_rect().end.x <= vw + 0.5, "в настройках за краем экрана: %s «%s»" % [c.get_class(), c.text if "text" in c else ""])
 	menu.queue_free()
+
+
+
+## Режим «ключевые»: к углам, кратным 45°, притягивает только вблизи (±magnet_deg), остальное свободно; подпись угла.
+func test_key_angle_snap() -> void:
+	var g = await new_game(0)
+	g.snap_mode = 2
+	GameData.magnet_deg = 2
+	for pair in [[-43.0, -45.0], [-47.0, -45.0], [-48.0, -48.0], [-30.0, -30.0], [1.5, 0.0], [-88.0, -90.0], [-85.0, -85.0], [178.0, 180.0]]:
+		check(is_equal_approx(g._snap(pair[0]), pair[1]), "±2°: %.1f → %.1f, а не %.1f" % [pair[0], g._snap(pair[0]), pair[1]])
+	GameData.magnet_deg = 5
+	check(is_equal_approx(g._snap(-40.0), -45.0) and is_equal_approx(g._snap(-39.0), -39.0), "±5° работает неверно")
+	GameData.magnet_deg = 2
+	# три режима по кругу, 90° больше нет
+	g.snap_mode = 0
+	var names := []
+	for k in 3:
+		g._cycle_snap()
+		names.append(g.btn_snap.text)
+	check(names == ["45°", "ключевые", "любой"], "режимы угла: %s" % str(names))
+	# подпись угла: как на транспортире
+	for pair in [[0.0, 0], [-90.0, 90], [90.0, 270], [-45.0, 45], [180.0, 180], [-135.0, 135]]:
+		check(g._angle_deg(pair[0]) == pair[1], "угол %.0f подписан как %d, а не %d" % [pair[0], g._angle_deg(pair[0]), pair[1]])
+	# настройка сохраняется
+	GameData.magnet_deg = 4
+	GameData.save_settings()
+	GameData.magnet_deg = 2
+	GameData.load_settings()
+	check(GameData.magnet_deg == 4, "ширина притяжения не сохранилась")
+	GameData.magnet_deg = 2
+	GameData.save_settings()

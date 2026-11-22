@@ -67,6 +67,7 @@ var sfx_vol := 0.8           # громкость звуков 0..1
 var music_on := true         # = music_vol > 0
 var sfx_on := true           # = sfx_vol > 0
 var vibration_on := true     # мини-вибрация при начале прицеливания
+var magnet_deg := 2          # режим «ключевые»: притяжение к углам, кратным 45°, в пределах ±N° (1–5)
 var vibrations := 0          # счётчик вибраций — для тестов
 var lang := "ru"             # действующий язык интерфейса
 var lang_choice := ""        # выбор игрока; пусто — как в системе
@@ -279,6 +280,7 @@ func save_settings() -> void:
 	write_atomic(SETTINGS_PATH, JSON.stringify({
 		"eco_mode": eco_mode, "keep_screen": keep_screen, "lang_choice": lang_choice,
 		"music_vol": music_vol, "sfx_vol": sfx_vol, "vibration_on": vibration_on, "slot": slot,
+		"magnet_deg": magnet_deg,
 	}))
 
 
@@ -293,6 +295,7 @@ func load_settings() -> void:
 	sfx_vol = clampf(float(d.get("sfx_vol", 0.8)), 0.0, 1.0) if typeof(d.get("sfx_vol", 0.8)) in [TYPE_INT, TYPE_FLOAT] else 0.8
 	vibration_on = bool(d.get("vibration_on", true))
 	slot = clampi(_int(d.get("slot", 1)), 1, SLOTS)
+	magnet_deg = clampi(_int(d.get("magnet_deg", 2)), 1, 5)
 
 
 ## Профили: краткая сводка для экрана выбора (без переключения).

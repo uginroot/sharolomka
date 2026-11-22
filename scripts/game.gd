@@ -1686,6 +1686,16 @@ func _draw_overlay() -> void:
 			overlay.draw_line(lp, tip - dir * (18.0 / zoom), acol, 5.0 / zoom)
 			overlay.draw_colored_polygon(PackedVector2Array([tip, tip - dir * (26.0 / zoom) + side,
 				tip - dir * (26.0 / zoom) - side]), acol)
+			# угол у кончика стрелки; на ключевом угле (кратном 45°) — золотой
+			var deg := _angle_deg(aim_angle)
+			var on_key := deg % 45 == 0
+			var fsz := int(26.0 / zoom)
+			var lp2: Vector2 = tip + dir * (34.0 / zoom) - Vector2(fsz * 1.5, -fsz * 0.35)
+			var font2: Font = GameData.font_bold
+			var txt := "%d°" % deg
+			overlay.draw_string_outline(font2, lp2, txt, HORIZONTAL_ALIGNMENT_CENTER, fsz * 3.0, fsz, int(6.0 / zoom), Color(0, 0, 0, 0.85))
+			overlay.draw_string(font2, lp2, txt, HORIZONTAL_ALIGNMENT_CENTER, fsz * 3.0, fsz,
+				Color(1.0, 0.82, 0.3) if on_key else Color.WHITE)
 	var font: Font = GameData.font_bold
 	var fs := int(clampf(26.0 / zoom, 26.0, 4000.0))
 	for p in popups:
@@ -1955,13 +1965,21 @@ func _pinch_update() -> void:
 	pinch_mid = mid
 
 
+## Режимы угла: 0 — любой; 1 — кратно 45°; 2 — «ключевые»: к углам, кратным 45°, прицел притягивается
+## только вблизи (± GameData.magnet_deg градусов, настраивается 1–5°), остальные углы — свободно.
 func _snap(a: float) -> float:
 	match snap_mode:
 		1:
 			return round(a / 45.0) * 45.0
 		2:
-			return round(a / 90.0) * 90.0
+			var key: float = round(a / 45.0) * 45.0
+			return key if absf(a - key) <= float(GameData.magnet_deg) + 0.001 else a
 	return a
+
+
+## Угол для подписи: как на транспортире — 0° вправо, 90° вверх, 0…359.
+func _angle_deg(a: float) -> int:
+	return int(round(fposmod(-a, 360.0))) % 360
 
 
 func _cycle_snap() -> void:
@@ -2277,7 +2295,9 @@ func _build_ui() -> void:
 	frenzy_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	frenzy_label.add_theme_font_override("font", GameData.font_bold)
 	frenzy_label.add_theme_font_size_override("font_size", 21)
-	frenzy_label.add_theme_color_override("font_color", Color(0.12, 0.08, 0.0))
+	frenzy_label.add_theme_color_override("font_color", Color.WHITE)   # белый с обводкой — читается и на золоте, и на тёмном
+	frenzy_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	frenzy_label.add_theme_constant_override("outline_size", 6)
 	frenzy_bar.add_child(frenzy_label)
 
 	# --- всплывающее сообщение — тоже под окном прокачки
@@ -2582,7 +2602,7 @@ func _refresh_ui() -> void:
 		lbl_prog.text = tr("Разбито %s") % GameData.fmt(destroyed)
 	else:
 		lbl_prog.text = tr("%s из %s") % [GameData.fmt(destroyed), GameData.fmt(goal)]
-	btn_snap.text = [tr("любой"), tr("45°"), tr("90°")][snap_mode]
+	btn_snap.text = [tr("любой"), tr("45°"), tr("ключевые")][snap_mode]
 	if frenzy_t > 0.0:
 		frenzy_label.text = tr("Урон ×2 · %d с") % int(ceil(frenzy_t))
 		frenzy_prog.max_value = frenzy_max

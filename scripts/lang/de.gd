@@ -33,7 +33,6 @@ const T := {
 	"Прокачка": "Upgrades",
 	"любой": "frei",
 	"45°": "45°",
-	"90°": "90°",
 	"Разбито %d%%": "Zerstört %d%%",
 	"Разбито %s": "Zerstört %s",
 	"%s из %s": "%s von %s",
@@ -139,4 +138,7 @@ const T := {
 	"+1 U на старте уровня": "+1 U beim Levelstart",
 	"+1 бесплатный шар на старте": "+1 kostenlose Kugel beim Start",
 	"+20% золотых квадратов": "+20 % goldene Quadrate",
+	"ключевые": "Schlüssel",
+	"Залипание к ключевым углам": "Einrasten an Schlüsselwinkeln",
+	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "Im Modus „Schlüssel“ rastet das Zielen auf Vielfache von 45° ein, wenn es näher ist als dieser Wert",
 }

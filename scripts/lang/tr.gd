@@ -33,7 +33,6 @@ const T := {
 	"Прокачка": "Geliştirmeler",
 	"любой": "serbest",
 	"45°": "45°",
-	"90°": "90°",
 	"Разбито %d%%": "Kırılan %d%%",
 	"Разбито %s": "Kırılan %s",
 	"%s из %s": "%s / %s",
@@ -139,4 +138,7 @@ const T := {
 	"+1 U на старте уровня": "Seviye başında +1 U",
 	"+1 бесплатный шар на старте": "Başlangıçta +1 bedava top",
 	"+20% золотых квадратов": "+%20 altın kare",
+	"ключевые": "anahtar",
+	"Залипание к ключевым углам": "Anahtar açılara yapışma",
+	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "“Anahtar” modunda nişan, bundan daha yakınsa 45°'nin katlarına yapışır",
 }

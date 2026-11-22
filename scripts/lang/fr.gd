@@ -33,7 +33,6 @@ const T := {
 	"Прокачка": "Améliorations",
 	"любой": "libre",
 	"45°": "45°",
-	"90°": "90°",
 	"Разбито %d%%": "Cassé %d%%",
 	"Разбито %s": "Cassés %s",
 	"%s из %s": "%s sur %s",
@@ -139,4 +138,7 @@ const T := {
 	"+1 U на старте уровня": "+1 U au début du niveau",
 	"+1 бесплатный шар на старте": "+1 balle gratuite au départ",
 	"+20% золотых квадратов": "+20 % de carrés dorés",
+	"ключевые": "clés",
+	"Залипание к ключевым углам": "Aimant des angles clés",
+	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "En mode « clés », la visée s’aimante aux multiples de 45° si elle en est plus proche que ceci",
 }

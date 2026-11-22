@@ -385,6 +385,29 @@ func _setting_row(title: String, hint: String, control: Control) -> void:
 	h.add_child(control)
 
 
+## Строка настроек с элементом под текстом — для длинных названий и ползунков (не раздвигает экран).
+func _setting_block(title: String, hint: String, control: Control) -> void:
+	var card := PanelContainer.new()
+	card.theme_type_variation = "Card"
+	settings_box.add_child(card)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	card.add_child(v)
+	var t := Label.new()
+	t.text = title
+	t.theme_type_variation = "Title"
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(t)
+	if hint != "":
+		var hl := Label.new()
+		hl.text = hint
+		hl.theme_type_variation = "Muted"
+		hl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.add_child(hl)
+	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_child(control)
+
+
 func _toggle(on: bool, cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = tr("Вкл") if on else tr("Выкл")
@@ -409,6 +432,24 @@ func _fill_settings() -> void:
 	_setting_row(tr("Музыка"), "", _slider(GameData.music_vol, _set_music_vol))
 	_setting_row(tr("Звуки игры"), "", _slider(GameData.sfx_vol, _set_sfx_vol))
 	_setting_row(tr("Вибрация"), tr("Короткий отклик, когда начинается прицел"), _toggle(GameData.vibration_on, _toggle_vibration))
+	var mg := HSlider.new()
+	mg.min_value = 1
+	mg.max_value = 5
+	mg.step = 1
+	mg.value = GameData.magnet_deg
+	mg.custom_minimum_size = Vector2(200, 44)
+	var mg_lbl := Label.new()
+	mg_lbl.text = "±%d°" % GameData.magnet_deg
+	mg_lbl.custom_minimum_size.x = 60
+	mg.value_changed.connect(func(v):
+		GameData.magnet_deg = int(v)
+		mg_lbl.text = "±%d°" % int(v))
+	mg.drag_ended.connect(func(_c): GameData.save_settings())
+	var mgr := HBoxContainer.new()
+	mgr.add_child(mg)
+	mgr.add_child(mg_lbl)
+	mg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_setting_block(tr("Залипание к ключевым углам"), tr("В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого"), mgr)
 	_setting_row(tr("Экономия батареи"), tr("30 кадров в секунду вместо 60"), _toggle(GameData.eco_mode, _toggle_eco))
 	_setting_row(tr("Не гасить экран"), tr("Пока открыта игра"), _toggle(GameData.keep_screen, _toggle_screen))
 	# язык: «Как в системе» + кнопки с названиями языков на них самих

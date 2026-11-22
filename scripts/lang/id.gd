@@ -33,7 +33,6 @@ const T := {
 	"Прокачка": "Peningkatan",
 	"любой": "bebas",
 	"45°": "45°",
-	"90°": "90°",
 	"Разбито %d%%": "Hancur %d%%",
 	"Разбито %s": "Hancur %s",
 	"%s из %s": "%s dari %s",
@@ -139,4 +138,7 @@ const T := {
 	"+1 U на старте уровня": "+1 U saat level dimulai",
 	"+1 бесплатный шар на старте": "+1 bola gratis di awal",
 	"+20% золотых квадратов": "+20% kotak emas",
+	"ключевые": "kunci",
+	"Залипание к ключевым углам": "Tarik ke sudut kunci",
+	"В режиме «ключевые» прицел притягивается к углам, кратным 45°, если он ближе этого": "Dalam mode “kunci”, bidikan menempel ke kelipatan 45° jika lebih dekat dari ini",
 }
