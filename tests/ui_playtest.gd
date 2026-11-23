@@ -21,7 +21,7 @@ func _start() -> void:
 	GameData.reset_all()
 	GameData.lang_choice = "ru"
 	GameData.apply_settings()
-	GameData.meta = {"splash": 1}
+	GameData.meta = {}
 	GameData.refresh_unlocked()
 	GameData.save_game()
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
@@ -195,16 +195,16 @@ func _run() -> void:
 	await _shot("upgrades")
 	# прокрутка списка пальцем, даже если палец лежит на кнопке (вкладка «Перки» длиннее экрана)
 	var tabs0: TabContainer = g.upg.find_children("*", "TabContainer", true, false)[0]
-	tabs0.current_tab = 1
+	tabs0.current_tab = 0
 	await _wait(0.3)
-	var sc: ScrollContainer = tabs0.get_child(1)
+	var sc: ScrollContainer = tabs0.get_child(0)
 	var vbar := sc.get_v_scroll_bar()
 	var scrollable := vbar.max_value > vbar.page + 1.0
 	print("    прокрутка: содержимое %.0f, видно %.0f" % [vbar.max_value, vbar.page])
 	if scrollable:
-		var btn: Button = g.perk_refs["basic"][1]
+		var btn: Button = g.shop_refs["basic"]["tracks"]["speed"]["button"]
 		var sp: Vector2 = btn.get_global_rect().get_center()
-		var u0: int = g.run_u
+		var u0: int = g._tl("basic", "speed")
 		_touch(sp, true)
 		await get_tree().process_frame
 		for k in 12:
@@ -213,24 +213,26 @@ func _run() -> void:
 		_touch(sp - Vector2(0, 360), false)
 		await _wait(0.3)
 		check(sc.scroll_vertical > 0, "список перков прокручивается пальцем с кнопки")
-		check(g.run_u == u0, "прокрутка не нажала кнопку узла дерева")
+		check(g._tl("basic", "speed") == u0, "прокрутка не нажала кнопку ветки")
 		sc.scroll_vertical = 0
 	tabs0.current_tab = 0
 	await _wait(0.2)
-	var dmg0: int = g.dmg_lvl["basic"]
-	var dmg_btn: Button = g.shop_refs["basic"]["dmg"]["button"]
+	var dmg0: int = g._tl("basic", "impact")
+	var dmg_btn: Button = g.shop_refs["basic"]["tracks"]["impact"]["button"]
 	await _tap_at(dmg_btn.get_global_rect().get_center())
-	check(int(g.dmg_lvl["basic"]) == dmg0 + 1, "покупка урона касанием")
+	check(g._tl("basic", "impact") == dmg0 + 1, "покупка «Силы удара» касанием")
 	var tabs: TabContainer = g.upg.find_children("*", "TabContainer", true, false)[0]
-	tabs.current_tab = 1
+	# открыть тип за 1 U касанием
+	g.run_u = 3
+	g._show_upgrades(true)
+	g._refresh_ui()
+	await _wait(0.2)
+	var ub: Button = g.shop_refs["sniper"]["unlock"]
+	await _tap_at(ub.get_global_rect().get_center())
+	await _wait(0.2)
+	check(g.unl["sniper"] and g.run_u == 2, "тип открывается касанием за 1 U")
 	await _wait(0.3)
 	await _shot("perks")
-	check(g.perk_refs.has("basic") and g.perk_refs["basic"].size() == 8, "во вкладке «Умения» есть дерево из 8 узлов")
-	g.run_u = 3
-	g._refresh_ui()
-	var root_btn: Button = g.perk_refs["basic"][0]
-	await _tap_at(root_btn.get_global_rect().get_center())
-	check(g.tree["basic"][0] and g.run_u == 2, "узел дерева покупается касанием за U уровня")
 	check(await _tap("Вернуться к игре"), "кнопка «Вернуться к игре»")
 	check(not g.upg.visible, "окно прокачки закрылось")
 
@@ -282,7 +284,7 @@ func _run() -> void:
 	await _wait(0.3)
 	await _shot("legacy")
 	var ml = get_tree().current_scene
-	check(ml.legacy_root.visible and ml.legacy_box.get_child_count() == 5, "в «Наследии» 5 веток")
+	check(ml.legacy_root.visible and ml.legacy_box.get_child_count() == 4, "в «Наследии» 4 ветки")
 	ml._show_screen("main")
 	await _wait(0.2)
 	check(await _tap("Профиль 1"), "в меню есть кнопка профиля")

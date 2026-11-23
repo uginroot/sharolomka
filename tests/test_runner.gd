@@ -71,32 +71,21 @@ func _free_game() -> void:
 		game = null
 
 
-var _pending_tree := -1   # заполнить деревья умений после создания уровня (unlock_all)
-var _pending_super := false
+var _pending_unlock := false   # открыть все типы на создаваемом уровне (unlock_all)
 
 
-## Открыть все типы шаров («Наследие») и после создания уровня заполнить деревья умений:
-## perk 2/4/5 → 1/2/3 узла ветки умения; sup → всё дерево, включая суперспособность.
-func unlock_all(perk: int = 0, sup: bool = false) -> void:
-	for t in ["splash", "sniper", "pierce", "poison"]:
-		GameData.meta[t] = 1
-	GameData.refresh_unlocked()
-	_pending_tree = perk
-	_pending_super = sup
+## Открыть на создаваемом уровне все шесть типов (в игре — по 1 U). Параметры — для совместимости старых вызовов.
+func unlock_all(_perk: int = 0, _sup: bool = false) -> void:
+	_pending_unlock = true
 
 
 func _apply_tree(g) -> void:
-	if _pending_tree < 0:
+	if not _pending_unlock:
 		return
 	for t in GameData.TYPE_ORDER:
-		var n: int = 0 if _pending_tree <= 0 else (1 if _pending_tree < 4 else (2 if _pending_tree < 5 else 3))
-		var arr := [n > 0 or _pending_super, n >= 1, n >= 2, n >= 3, _pending_super, _pending_super, _pending_super, _pending_super]
-		if _pending_super:
-			arr = [true, true, true, true, true, true, true, true]
-		g.tree[t] = arr
-	g._recalc_stats()
-	_pending_tree = -1
-	_pending_super = false
+		g.unl[t] = true
+	g._rebuild_rows()
+	_pending_unlock = false
 
 
 func fire_n(g, t: String, n: int) -> void:
@@ -248,7 +237,9 @@ func test_economy_and_counters() -> void:
 		for li in 1024:
 			if c.kind[li] == 1:
 				hp1 += c.hp[li]
-	check(g.coins - r0 == hp0 - hp1, "монеты %d ≠ снятые жизни %d" % [g.coins - r0, hp0 - hp1])
+	# монеты = снятые жизни × множитель (бонус стаи Пронизывающих: 10 шт. = 2 ступени = +10%)
+	var expect := int(floor((hp0 - hp1) * g.coin_mult))
+	check(absi(g.coins - r0 - expect) <= 1, "монеты %d ≠ снятые жизни %d × %.2f" % [g.coins - r0, hp0 - hp1, g.coin_mult])
 	var alive := 0
 	for ck in g.chunks.size():
 		var c = g.chunks[ck]
@@ -373,7 +364,7 @@ func test_meadow_completes() -> void:
 	fire_n(g, "splash", 10)
 	fire_n(g, "pierce", 10)
 	for k in 6:
-		g._buy_dmg("splash")
+		g._buy_track("splash", "impact")
 	sim(g, 120.0, func(gg): return gg.alive > 0)
 	check(g.alive == 0, "за 120 с осталось квадратов: %d" % g.alive)
 	check(g.goal_done or g.destroyed >= g.goal, "цель не засчитана")
@@ -464,8 +455,12 @@ func test_translations_complete() -> void:
 		for m in re.search_all(src):
 			keys[m.get_string(1).replace("\\n", "\n").replace('\\"', '"')] = f
 	for t in GameData.TYPE_ORDER:
-		for k in ["name", "desc", "perk", "perk_desc", "super", "super_desc"]:
+		for k in ["name", "desc"]:
 			keys[GameData.TYPES[t][k]] = "game_data.gd"
+		for tr_ in GameData.TYPES[t]["tracks"]:
+			keys[tr_["name"]] = "game_data.gd (ветки)"
+	for f in GameData.FLEET_DESC:
+		keys[GameData.FLEET_DESC[f]] = "game_data.gd (бонус стаи)"
 	for mp in preload("res://scripts/maps.gd").get_maps():
 		keys[mp["name"]] = "maps.gd"
 	for th in preload("res://scripts/maps.gd").THEMES:
@@ -543,13 +538,11 @@ func test_bottom_bar_fits() -> void:
 		g._show_upgrades(true)
 		for k in 3:
 			await get_tree().process_frame
-		for t in g.perk_refs:
-			for nb in g.perk_refs[t]:
-				check(nb.get_global_rect().end.x <= vw + 0.5, "%s: узел дерева %s за краем экрана: %s" % [code, t, nb.text])
 		for t in g.shop_refs:
-			for key in ["dmg", "spd"]:
-				var lb: Label = g.shop_refs[t][key]["label"]
-				check(lb.get_global_rect().end.x <= vw + 0.5, "%s: подпись «%s» за краем экрана" % [code, lb.text])
+			for id in g.shop_refs[t].get("tracks", {}):
+				var lb: Label = g.shop_refs[t]["tracks"][id]["label"]
+				var bt: Button = g.shop_refs[t]["tracks"][id]["button"]
+				check(bt.get_global_rect().end.x <= vw + 0.5, "%s: кнопка ветки «%s» за краем экрана" % [code, lb.text])
 		g._show_upgrades(false)
 	GameData.lang_choice = "ru"
 	GameData.apply_settings()
@@ -720,10 +713,11 @@ func test_costs_no_overflow() -> void:
 	var g = await new_game(0)
 	for n in [0, 50, 150, 400, 2000]:
 		g.counts["basic"] = n
-		g.dmg_lvl["basic"] = n
-		g.spd_lvl["basic"] = mini(n, 10)
+		g.tlvl["basic"]["impact"] = n
+		g.tlvl["basic"]["speed"] = n
 		check(g._ball_cost("basic") > 0, "цена шара при n=%d: %d" % [n, g._ball_cost("basic")])
-		check(g._dmg_cost("basic") > 0, "цена урона при ур.%d: %d" % [n, g._dmg_cost("basic")])
+		check(g._track_cost("basic", "impact") > 0, "цена удара при ур.%d: %d" % [n, g._track_cost("basic", "impact")])
+		check(g._speed("basic") <= g.MAX_SPEED + 0.01, "скорость выше предела при ур.%d" % n)
 	g.counts["basic"] = 2000
 	g.coins = 1_000_000_000_000_000_000
 	var n0: int = g.balls.size()
@@ -824,15 +818,16 @@ func test_chaos() -> void:
 			var a := rng.randi() % 12
 			match a:
 				0, 1, 2:
-					g._select(GameData.TYPE_ORDER[rng.randi() % 5])
+					g._select(GameData.TYPE_ORDER[rng.randi() % 6])
 					var lp = g._launch_from(g.start_pos + Vector2(rng.randf_range(-30, 30), rng.randf_range(-30, 30)))
 					if lp != null:
 						g.aim_angle = rng.randf_range(-180, 180)
 						g._fire(lp)
 				3:
-					g._buy_dmg(GameData.TYPE_ORDER[rng.randi() % 5])
+					var tt: String = GameData.TYPE_ORDER[rng.randi() % 6]
+					g._buy_track(tt, GameData.TYPES[tt]["tracks"][rng.randi() % GameData.TYPES[tt]["tracks"].size()]["id"])
 				4:
-					g._buy_spd(GameData.TYPE_ORDER[rng.randi() % 5])
+					g._buy_track(GameData.TYPE_ORDER[rng.randi() % 6], "speed")
 				5:
 					g._reset_stuck()
 				6:
@@ -907,7 +902,8 @@ func test_corrupt_global_save() -> void:
 	check(typeof(GameData.map_states) == TYPE_DICTIONARY and typeof(GameData.maps_done) == TYPE_DICTIONARY, "словари из мусора")
 	GameData.write_atomic(GameData.save_path(), JSON.stringify({"stars": 3, "meta": {"frenzy": 99, "sniper": 7}}))
 	GameData.load_game()
-	check(GameData.meta_level("frenzy") == 5 and GameData.meta_level("sniper") == 1, "уровни «Наследия» не ограничены максимумом")
+	check(GameData.meta_level("frenzy") == 5, "уровни «Наследия» не ограничены максимумом")
+	check(GameData.stars == 3 + 2 and not GameData.meta.has("sniper"), "★ за «Арсенал» не вернулись при битом уровне")
 	GameData.reset_all()
 
 
@@ -973,7 +969,7 @@ func test_finale_completes() -> void:
 	g.coins = 100_000_000
 	fire_n(g, "basic", 10)
 	for k in 10:
-		g._buy_dmg("basic")   # урон ×22 — финал проверяет наведение, а не терпение
+		g._buy_track("basic", "impact")   # урон ×11 — финал проверяет наведение, а не терпение
 	var t0: float = g.time_acc
 	sim(g, 90.0, func(gg):
 		gg._check_goal()
@@ -982,13 +978,23 @@ func test_finale_completes() -> void:
 	print("    финал на %d квадратов занял %.0f с" % [keep, g.time_acc - t0])
 
 
-## Урон: на каждом 10-м уровне — дополнительное удвоение.
-func test_damage_milestones() -> void:
+## Ветки за монеты (как в pixel-rikoshet): «Сила удара» +1 (Отбойник +3) за уровень; цены — заданные, дальше ×1.7.
+func test_tracks() -> void:
 	var g = await new_game(0)
-	var base: float = GameData.TYPES["basic"]["damage"]
-	for pair in [[0, 1], [9, 10], [10, 22], [19, 40], [20, 84]]:
-		g.dmg_lvl["basic"] = pair[0]
-		check(g._damage_of("basic") == int(base * pair[1]), "урон на ур.%d: %d, а не %d" % [pair[0], g._damage_of("basic"), int(base * pair[1])])
+	check(g._damage_of("basic") == 1 and g._damage_of("pierce") == 8 and g._damage_of("poison") == 0, "базовый урон не как в каталоге")
+	g.tlvl["basic"]["impact"] = 4
+	g.tlvl["pierce"]["impact"] = 2
+	check(g._damage_of("basic") == 5 and g._damage_of("pierce") == 14, "«Сила удара» не линейная")
+	g.tlvl["basic"]["impact"] = 0
+	var costs := []
+	for k in 5:
+		costs.append(g._track_cost("basic", "impact"))
+		g.tlvl["basic"]["impact"] = k + 1
+	check(costs[0] == 50 and costs[1] == 112 and costs[2] == 240, "заданные цены ветки: %s" % str(costs))
+	check(costs[3] == int(round(240 * 1.7)) and costs[4] == int(round(240 * 1.7 * 1.7)), "после заданных цен не ×1.7: %s" % str(costs))
+	# цена пуска: (база + 5·n)·1.12ⁿ
+	g.counts["sniper"] = 10
+	check(g._ball_cost("sniper") == int(round((50 + 50) * pow(1.12, 10))), "цена пуска не по формуле")
 
 
 ## Бонус монет из «Наследия»: +10% за уровень «Бонуса монет».
@@ -1085,9 +1091,7 @@ func test_menu_endless() -> void:
 func test_legacy() -> void:
 	GameData.reset_all()
 	GameData.stars = 30
-	check(not GameData.meta_buy("sniper"), "«Снайпер» открылся без «Бомбы» (цепочка)")
-	check(GameData.meta_buy("splash") and GameData.stars == 29, "«Бомба» не открылась за 1 ★")
-	check(GameData.unlocked["splash"], "после покупки «Бомба» не открыта")
+	check(not GameData.meta_buy("start_coins"), "«Стартовые монеты» купились без «Бонуса монет» (цепочка)")
 	check(GameData.meta_buy("coin_bonus") and GameData.meta_cost("coin_bonus") == 2, "цена «Бонуса монет» не растёт")
 	check(GameData.meta_buy("start_coins"), "«Стартовые монеты» не купились после «Бонуса монет»")
 	check(GameData.meta_buy("start_balls") and GameData.meta_buy("dmg_bonus"), "не купились «Стартовые шары» и «Урон»")
@@ -1108,6 +1112,10 @@ func test_legacy() -> void:
 	check(g.coins == 90, "стартовых монет %d, а должно быть 90" % g.coins)
 	check(g.run_u == 2, "стартовых U %d, а должно быть 2" % g.run_u)
 	check(is_equal_approx(GameData.dmg_mult(), 1.1), "«Урон» не дал +10%")
+	# «Арсенал» убран: потраченные на него ★ возвращаются
+	GameData.write_atomic(GameData.save_path(), JSON.stringify({"stars": 1, "meta": {"splash": 1, "sniper": 1}}))
+	GameData.load_game()
+	check(GameData.stars == 1 + 1 + 2 and not GameData.meta.has("splash"), "★ за «Арсенал» не вернулись: %d" % GameData.stars)
 
 
 ## Раскладки картинок — узоры, а не россыпь: в кольце один мотив, левая половина зеркальная, детерминировано.
@@ -1230,39 +1238,49 @@ func test_whole_map_visible() -> void:
 
 
 
-## Дерево умений шара: покупается за U уровня, ветки по порядку, суперспособность — после обеих веток.
-func test_skill_tree() -> void:
-	var g = await new_game(2, func(): unlock_all())
-	g.run_u = 100
-	check(not g._tree_can_buy("splash", 1), "узел ветки куплен без основы")
-	g._tree_buy("splash", 0)
-	check(g.tree["splash"][0] and g.run_u == 99, "основа не купилась за 1 U")
-	var d0: int = g._damage_of("basic")
-	g._tree_buy("basic", 0)
-	check(g._damage_of("basic") == int(round(d0 * 1.2)) or g._damage_of("basic") == maxi(1, int(round(d0 * 1.2))), "основа не дала +20% урона")
-	g._tree_buy("splash", 1)
-	g._tree_buy("splash", 2)
-	check(g._perk_lvl("splash") == 4, "два узла ветки умения дали уровень %d, а не 4" % g._perk_lvl("splash"))
-	g._tree_buy("splash", 3)
-	check(not g._tree_can_buy("splash", 7), "суперспособность доступна без ветки скорости")
-	var s0: float = g._speed("splash")
-	for k in [4, 5, 6]:
-		g._tree_buy("splash", k)
-	check(is_equal_approx(g._speed("splash"), s0 * 1.3), "ветка скорости не дала +30%")
-	g._tree_buy("splash", 7)
-	check(g.st_sup[1] == 1, "суперспособность не включилась")
-	# дерево сохраняется с уровнем, а новый уровень начинается с пустым деревом
-	g._save_state()
-	var u_left: int = g.run_u
-	game.queue_free()
-	game = null
-	await get_tree().process_frame
-	game = GAME.instantiate()
-	add_child(game)
-	check(game.tree["splash"] == [true, true, true, true, true, true, true, true] and game.run_u == u_left,
-		"дерево или U уровня не сохранились")
-	var g2 = await new_game(3, func(): unlock_all())
-	check(not g2.tree["splash"].has(true), "на новом уровне дерево не сброшено")
+## Открытие типа за 1 U, бонусы стаи по ступеням, яд по тикам, удар по соседям, аура Знаменосца.
+func test_balls_and_fleet() -> void:
+	var g = await new_game(2)
+	check(g.unl["basic"] and not g.unl["sniper"], "на старте уровня открыт не только Пронизывающий")
+	g.run_u = 2
+	g._unlock_type("sniper")
+	check(g.unl["sniper"] and g.run_u == 1, "тип не открылся за 1 U")
+	# бонусы стаи: ступени 5, 10, 20…80
+	for pair in [[4, 0], [5, 1], [10, 2], [19, 2], [20, 3], [80, 9], [200, 9]]:
+		check(GameData.fleet_steps(pair[0]) == pair[1], "ступень для %d шаров: %d" % [pair[0], GameData.fleet_steps(pair[0])])
+	var s0: float = g._speed("basic")
+	g.counts["sniper"] = 10
+	g._recalc_stats()
+	check(is_equal_approx(g._speed("basic"), s0 * 1.1), "Гесиевые не ускорили всех (+10% на 2-й ступени)")
+	g.counts["pierce"] = 5
+	g._recalc_stats()
+	check(g._damage_of("basic") == 2, "Отбойники не дали +1 к удару всем")
+	# яд: Антониевый не бьёт, а копит тики
+	g.unl["poison"] = true
+	g.coins = 10000
+	g.selected = "poison"
+	g._fire(g.start_pos)
+	var pb = g.balls[-1]
+	var id := -1
+	for y in range(g.ey0, g.ey1 + 1):
+		for x in range(g.ex0, g.ex1 + 1):
+			if id < 0 and g._kind_at(x, y) == 1 and g._vis_at(x, y) and g._hp_of(y * g.W + x) >= 3:
+				id = y * g.W + x
+	var hp0: int = g._hp_of(id)
+	g._hit_cell(pb, id)
+	g._hit_cell(pb, id)
+	check(g._hp_of(id) == hp0 and g.poisons[id]["left"] == 2, "Антониевый ударил напрямую или тики не копятся")
+	g._tick_poison(2.5)
+	check(g._hp_of(id) == hp0 - 2, "яд снял не 2 HP за 2 тика")
+	# Знаменосец: бафф шарам в круге
+	g.unl["banner"] = true
+	g.selected = "banner"
+	g._fire(g.start_pos)
+	g.selected = "basic"
+	g._fire(g.start_pos)
+	var bb = g.balls[-1]
+	g._update_aura()
+	check(bb.buff_t > 0.9 and is_equal_approx(bb.buff, 0.3), "шар в круге Знаменосца не получил бафф")
 
 
 ## Профили: прогресс раздельный, настройки общие, удаление чистит только свой профиль.
@@ -1296,8 +1314,7 @@ func test_migration() -> void:
 	GameData._migrate_old_save()
 	GameData.load_settings()
 	GameData.load_game()
-	check(GameData.stars == 3 + 4 + 5 + 3, "звёзд после переноса %d, а должно быть 15" % GameData.stars)
-	check(GameData.unlocked["splash"] and GameData.unlocked["sniper"] and not GameData.unlocked["pierce"], "открытые типы не перенеслись")
+	check(GameData.stars == 3 + 4 + 5 + 3 + 1 + 2, "звёзд после переноса %d, а должно быть 18" % GameData.stars)
 	check(GameData.maps_unlocked == 4 and GameData.maps_done.size() == 3, "пройденные уровни не перенеслись")
 	check(GameData.lang_choice == "de" and GameData.music_vol == 0.0, "настройки не перенеслись")
 	check(not FileAccess.file_exists("user://save.json"), "старый файл не удалён")

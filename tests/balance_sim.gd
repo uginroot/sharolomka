@@ -116,60 +116,47 @@ func _frontier_shot(g) -> Array:
 	return [g.last_launch, rng.randf_range(-180.0, 180.0)]
 
 
-## Покупает самое дешёвое из полезного: шар или урон любого открытого типа, скорость — если дешевле.
+## Покупает самое дешёвое из полезного: пуск любого открытого типа или уровень любой его ветки.
 func _shop(g) -> int:
 	var bought := 0
 	for k in 20:
 		var best_cost := INF
 		var best := []
 		for t in GameData.TYPE_ORDER:
-			if not GameData.unlocked[t]:
+			if not g.unl[t]:
 				continue
-			var opts := [["ball", g._ball_cost(t)], ["dmg", g._dmg_cost(t)]]
-			if int(g.spd_lvl[t]) < 10:
-				opts.append(["spd", g._spd_cost(t) * 1.5])   # скорость берёт реже
-			for o in opts:
-				if float(o[1]) < best_cost:
-					best_cost = float(o[1])
-					best = [o[0], t]
-		if best.is_empty() or g.coins < best_cost / (1.5 if best[0] == "spd" else 1.0):
+			var c: float = g._ball_cost(t)
+			if c < best_cost:
+				best_cost = c
+				best = ["ball", t, ""]
+			for tr_ in GameData.TYPES[t]["tracks"]:
+				var tc: float = g._track_cost(t, tr_["id"]) * (1.3 if tr_["id"] == "speed" else 1.0)
+				if int(g.counts[t]) > 0 and tc < best_cost:
+					best_cost = tc
+					best = ["track", t, tr_["id"]]
+		if best.is_empty():
 			break
-		var t: String = best[1]
-		match best[0]:
-			"ball":
-				g.selected = t
-				var s := _frontier_shot(g)
-				g.aim_angle = s[1]
-				g._fire(s[0])
-			"dmg":
-				g._buy_dmg(t)
-			"spd":
-				g._buy_spd(t)
+		var real: float = g._ball_cost(best[1]) if best[0] == "ball" else g._track_cost(best[1], best[2])
+		if g.coins < real:
+			break
+		if best[0] == "ball":
+			g.selected = best[1]
+			var s := _frontier_shot(g)
+			g.aim_angle = s[1]
+			g._fire(s[0])
+		else:
+			g._buy_track(best[1], best[2])
 		bought += 1
 	return bought
 
 
-## U-баллы уровня — на самый дешёвый доступный узел деревьев умений (сначала у типов, где есть шары).
+## U-баллы уровня — на открытие типов (1 U), в порядке каталога.
 func _spend_u(g) -> int:
 	var spent := 0
-	for k in 20:
-		var best_t := ""
-		var best_n := -1
-		var best_c := 999
-		for t in GameData.TYPE_ORDER:
-			if not GameData.unlocked[t]:
-				continue
-			for n in 8:
-				if g._tree_can_buy(t, n):
-					var c: int = g.TREE_COST[n] - (1 if int(g.counts[t]) > 0 else 0)
-					if c < best_c:
-						best_c = c
-						best_t = t
-						best_n = n
-		if best_n < 0:
-			break
-		spent += g.TREE_COST[best_n]
-		g._tree_buy(best_t, best_n)
+	for t in GameData.TYPE_ORDER:
+		if not g.unl[t] and g.run_u >= 1:
+			g._unlock_type(t)
+			spent += 1
 	return spent
 
 
@@ -181,7 +168,7 @@ func spend_stars() -> void:
 		for m in GameData.META:
 			var id: String = m["id"]
 			if GameData.meta_can_buy(id):
-				var c := GameData.meta_cost(id) - (2 if GameData.TYPES.has(id) else 0)
+				var c := GameData.meta_cost(id)
 				if c < bc:
 					bc = c
 					best = id

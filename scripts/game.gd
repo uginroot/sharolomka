@@ -14,15 +14,11 @@ const CS := 32                   # клеток в куске по сторон�
 const CPX := 1280.0              # CS * CELL
 const START_CLEAR := 2.3         # радиус пустой площадки у старта, клеток
 const RESET_CD := 30.0
-const SPD_MAX := 10
 const MAX_OFFLINE := 86400.0     # перематываем не больше суток
 const WARP_BUDGET_US := 9000     # сколько микросекунд за кадр можно тратить на перемотку
 const PREGEN_LIMIT := 60000      # карты меньше этого генерируем целиком (можно пройти на 100%)
 const GOLD_RATE := 30            # золотой квадрат: шанс на 10 000
 const FRENZY_TIME := 15.0        # «золотая лихорадка»: урон ×2, секунд
-## Дерево умений шара: 0 основа; 1–3 ветка «умение типа»; 4–6 ветка «скорость»; 7 суперспособность.
-const TREE_COST := [1, 2, 3, 4, 2, 3, 4, 6]
-const TREE_REQ := [[], [0], [1], [2], [0], [4], [5], [3, 6]]
 const U_PER_LEVEL := 25.0        # сколько U-баллов в среднем находится до цели уровня
 const FINALE_SHARE := 0.08       # финал маленькой карты, когда осталось ≤ 8% квадратов
 const FOG := Color(0.07, 0.08, 0.11)
@@ -66,7 +62,6 @@ var destroyed := 0
 var goal := 0
 var goal_done := false
 var run_u := 0                   # U-баллы этого уровня — тратятся на деревья умений шаров
-var tree := {}                   # дерево умений: тип → 8 флагов (сбрасывается каждый уровень)
 var u_ppm := 0                   # шанс U-балла в квадрате на миллион
 var gold_rate := GOLD_RATE       # шанс золотого квадрата на 10 000 (+ «Наследие»)
 var frenzy_time := FRENZY_TIME
@@ -90,14 +85,15 @@ var popups: Array = []
 var colors := {}
 var t_idx := {}
 var st_dmg := PackedInt32Array()
-var st_lvl := PackedInt32Array()
-var st_sup := PackedByteArray()
+var st_share := PackedFloat32Array()   # доля удара по соседям (Никитиевый + бонус стаи)
 
 # ---- экономика карты
 var coins := 0
 var counts := {}
-var dmg_lvl := {}
-var spd_lvl := {}
+var tlvl := {}                   # ветки за монеты: тип → {id ветки: уровень} (сбрасывается каждый уровень)
+var unl := {}                    # открытые типы на этом уровне (за 1 U)
+var fleet := {}                  # бонусы стаи: вид → число ступеней
+var aura_t := 0.0
 var reset_cd := {}
 var reset_armed := false        # «Сброс» включён: следующий выстрел перезапускает бездельника
 
@@ -199,13 +195,12 @@ func _ready() -> void:
 		var t: String = GameData.TYPE_ORDER[ti]
 		t_idx[t] = ti
 		counts[t] = 0
-		dmg_lvl[t] = 0
-		spd_lvl[t] = 0
+		tlvl[t] = {}
+		unl[t] = bool(GameData.unlocked.get(t, t == "basic"))
 		reset_cd[t] = 0.0
 		colors[t] = GameData.TYPES[t]["color"]
 	st_dmg.resize(GameData.TYPE_ORDER.size())
-	st_lvl.resize(GameData.TYPE_ORDER.size())
-	st_sup.resize(GameData.TYPE_ORDER.size())
+	st_share.resize(GameData.TYPE_ORDER.size())
 	ball_tex = Icons.ball(64)
 
 	W = int(map["w"])
@@ -245,8 +240,6 @@ func _ready() -> void:
 	add_child(overlay)
 	overlay.draw.connect(_draw_overlay)
 
-	for t in GameData.TYPE_ORDER:
-		tree[t] = [false, false, false, false, false, false, false, false]
 	var saved_at := _load_state()
 	if saved_at <= 0.0:
 		# новый уровень: всё с нуля, кроме «Наследия»
@@ -722,32 +715,29 @@ func _load_state() -> float:
 	if f == null:
 		return 0.0
 	var s = f.get_var()
-	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 6 or int(s.get("w", 0)) != W:
+	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 7 or int(s.get("w", 0)) != W:
 		return 0.0
 	coins = int(s.get("coins", s.get("rubles", 0)))   # до v0.14 ключ назывался "rubles"
 	destroyed = int(s.get("destroyed", 0))
 	goal_done = bool(s.get("goal_done", false))
 	var c: Dictionary = s.get("counts", {})
-	var dl: Dictionary = s.get("dmg", {})
-	var sl: Dictionary = s.get("spd", {})
+	var tl: Dictionary = s.get("tracks", {})
+	var ul: Dictionary = s.get("unl", {})
 	for t in GameData.TYPE_ORDER:
 		counts[t] = int(c.get(t, 0))
-		dmg_lvl[t] = int(dl.get(t, 0))
-		spd_lvl[t] = int(sl.get(t, 0))
+		var d: Dictionary = tl.get(t, {})
+		for k in d:
+			tlvl[t][String(k)] = int(d[k])
+		unl[t] = t == "basic" or bool(ul.get(t, false))
 	if int(counts["basic"]) == 0:
 		counts["basic"] = 1
 	run_u = int(s.get("u", 0))
-	var tr_saved: Dictionary = s.get("tree", {})
-	for t in GameData.TYPE_ORDER:
-		var arr: Array = tr_saved.get(t, [])
-		if arr.size() == 8:
-			tree[t] = arr.map(func(v): return bool(v))
 	saved_balls = s.get("balls", [])
 	var ll: Array = s.get("last_launch", [])
 	if ll.size() == 2:
 		last_launch = Vector2(ll[0], ll[1])
 	aim_angle = float(s.get("aim", aim_angle))
-	if GameData.unlocked.get(String(s.get("selected", "basic")), false):
+	if unl.get(String(s.get("selected", "basic")), false):
 		selected = String(s.get("selected", "basic"))
 	var ch: Dictionary = s.get("chunks", {})
 	for ck in ch:
@@ -783,12 +773,12 @@ func _save_state() -> void:
 			c.blob_dirty = false
 		out[ck] = c.blob
 	var s := {
-		"ver": 6, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
-		"counts": counts.duplicate(), "dmg": dmg_lvl.duplicate(), "spd": spd_lvl.duplicate(),
+		"ver": 7, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
+		"counts": counts.duplicate(), "tracks": tlvl.duplicate(true), "unl": unl.duplicate(),
 		"saved_at": Time.get_unix_time_from_system(), "chunks": out,
 		"balls": balls.map(func(b): return [b.type, b.pos.x, b.pos.y, b.vel.x, b.vel.y]),
 		"last_launch": [last_launch.x, last_launch.y], "aim": aim_angle, "selected": selected,
-		"u": run_u, "tree": tree.duplicate(true),
+		"u": run_u,
 	}
 	# пишем во временный файл и переименовываем: если телефон выключится посреди записи,
 	# останется прежнее целое сохранение, а не обрезанный файл
@@ -816,41 +806,76 @@ func _notification(what: int) -> void:
 
 # ================================================================ характеристики
 
+const MAX_SPEED := 50.0 * CELL      # предел скорости шара, px/с (у pixel-rikoshet — 300 кл/с; нам хватает 50)
+
+
+func _tl(t: String, id: String) -> int:
+	return int(tlvl[t].get(id, 0))
+
+
+func _track_def(t: String, id: String) -> Dictionary:
+	for tr_ in GameData.TYPES[t]["tracks"]:
+		if tr_["id"] == id:
+			return tr_
+	return {}
+
+
+## Цена уровня ветки: заданные цены, дальше каждая следующая ×1.7 (как в pixel-rikoshet), с потолком.
+func _track_cost(t: String, id: String) -> int:
+	var prices: Array = _track_def(t, id)["prices"]
+	var lv := _tl(t, id)
+	if lv < prices.size():
+		return int(prices[lv])
+	return _price(float(prices[-1]), 1.7, lv - prices.size() + 1)
+
+
+func _track_value(t: String, id: String, lv := -1) -> float:
+	var d := _track_def(t, id)
+	return float(d["value"]) * (_tl(t, id) if lv < 0 else lv)
+
+
 func _speed(t: String) -> float:
-	var b: int = int(tree[t][4]) + int(tree[t][5]) + int(tree[t][6])   # ветка «скорость»: +10% за узел
-	return float(GameData.TYPES[t]["speed"]) * (1.0 + 0.08 * int(spd_lvl[t])) * (1.0 + 0.1 * b)
+	var s := float(GameData.TYPES[t]["speed"]) * (1.0 + _track_value(t, "speed"))
+	s *= 1.0 + 0.05 * int(fleet.get("speed", 0))
+	return minf(s, MAX_SPEED)
 
 
-## Уровень умения типа (0..5) по ветке дерева: 1 узел → 2, 2 → 4, 3 → 5.
-func _perk_lvl(t: String) -> int:
-	return [0, 2, 4, 5][int(tree[t][1]) + int(tree[t][2]) + int(tree[t][3])]
+## Прямой урон удара: база + «Сила удара», × «Наследие» × бонус стаи Знаменосца, + плоская прибавка Отбойника.
+func _damage_of(t: String, lv := -1) -> int:
+	var def: Dictionary = GameData.TYPES[t]
+	if float(def["damage"]) <= 0.0:
+		return 0   # Антониевый бьёт только ядом
+	var d := float(def["damage"]) + (_track_value(t, "impact", lv) if not _track_def(t, "impact").is_empty() else 0.0)
+	d *= GameData.dmg_mult() * (1.0 + 0.05 * int(fleet.get("damage", 0)))
+	return maxi(1, int(round(d)) + int(fleet.get("flat", 0)))
 
 
-## Урон: base·(1 + ур.) и ×2 на каждом 10-м уровне — вехи держат рост экспоненциальным
-## (без них доход глохнет против экспоненциальных цен — симулятор баланса v0.16).
-func _damage_of(t: String) -> int:
-	var lv := int(dmg_lvl[t])
-	var d := float(GameData.TYPES[t]["damage"]) * (1 + lv) * pow(2.0, floori(lv / 10.0)) * GameData.dmg_mult()
-	if tree[t][0]:
-		d *= 1.2   # основа дерева: +20% урона
-	if t == "pierce":
-		d *= 1.0 + 0.2 * _perk_lvl(t)
-	return maxi(1, int(round(d)))
+func _poison_ticks(t := "poison") -> int:
+	return int(GameData.TYPES["poison"]["poison_ticks"]) + int(_track_value("poison", "ticks"))
 
 
-func _damage_of_next(t: String) -> int:
-	dmg_lvl[t] += 1
-	var d := _damage_of(t)
-	dmg_lvl[t] -= 1
-	return d
+func _poison_rate() -> float:
+	return float(GameData.TYPES["poison"]["poison_rate"]) + _track_value("poison", "cadence")
+
+
+func _aura_radius() -> float:
+	return (float(GameData.TYPES["banner"]["aura_radius"]) + _track_value("banner", "radius")) * CELL
+
+
+func _aura_hold() -> float:
+	return float(GameData.TYPES["banner"]["aura_hold"]) + _track_value("banner", "hold")
 
 
 func _recalc_stats() -> void:
+	for k in ["points", "speed", "splash", "poison", "damage", "flat"]:
+		fleet[k] = 0
+	for t in GameData.TYPE_ORDER:
+		fleet[GameData.TYPES[t]["fleet"]] += GameData.fleet_steps(int(counts[t]))
+	coin_mult = GameData.coin_mult() * (1.0 + 0.05 * int(fleet["points"]))
 	for ti in GameData.TYPE_ORDER.size():
 		var t: String = GameData.TYPE_ORDER[ti]
 		st_dmg[ti] = _damage_of(t)
-		st_lvl[ti] = _perk_lvl(t)
-		st_sup[ti] = 1 if tree[t][7] else 0
+		st_share[ti] = float(GameData.TYPES[t].get("smash_share", 0.0)) + 0.05 * int(fleet["splash"])
 
 
 ## Цена base·growth^n с потолком: без него на больших n float выходит за int64 и цена
@@ -862,16 +887,11 @@ static func _price(base: float, growth: float, n: int) -> int:
 	return int(minf(round(base * pow(growth, n)), PRICE_CAP))
 
 
+## Цена пуска (как в pixel-rikoshet): (база + 5·n)·1.12ⁿ, n — сколько шаров типа уже куплено.
+## Мягкий потолок около 60–70 шаров одного типа; основные монеты уходят в прокачку.
 func _ball_cost(t: String) -> int:
-	return _price(float(GameData.TYPES[t]["ball_cost"]), 1.35, int(counts[t]))
-
-
-func _dmg_cost(t: String) -> int:
-	return _price(float(GameData.TYPES[t]["dmg_cost"]), 1.55, int(dmg_lvl[t]))
-
-
-func _spd_cost(t: String) -> int:
-	return _price(float(GameData.TYPES[t]["spd_cost"]), 1.6, int(spd_lvl[t]))
+	var n := int(counts[t])
+	return int(minf(round((float(GameData.TYPES[t]["launch_base"]) + 5.0 * n) * pow(1.12, n)), PRICE_CAP))
 
 
 # ================================================================ симуляция
@@ -899,13 +919,58 @@ func _sim(dt: float) -> void:
 				_finale_steer(b)
 	if frenzy_t > 0.0:
 		frenzy_t = maxf(0.0, frenzy_t - dt)
+	aura_t -= dt
+	if aura_t <= 0.0:
+		aura_t = 0.1
+		_update_aura()
 	for b in balls:
+		if b.buff_t > 0.0:
+			b.buff_t -= dt
 		_move_ball(b, dt)
 	if not poisons.is_empty():
 		_tick_poison(dt)
 	for t in reset_cd:
 		if reset_cd[t] > 0.0:
 			reset_cd[t] = maxf(0.0, reset_cd[t] - dt)
+
+
+## Аура Знаменосца: шары в круге получают бафф урона и держат его _aura_hold() секунд.
+## Поиск через сетку с шагом в радиус ауры — без перебора «каждый с каждым». Знаменосцы друг друга не усиливают.
+func _update_aura() -> void:
+	if int(counts.get("banner", 0)) == 0:
+		return
+	var r := _aura_radius()
+	var r2 := r * r
+	var inv := 1.0 / r
+	var grid := {}
+	for bn in balls:
+		if bn.type == "banner":
+			var k := Vector2i(int(floor(bn.pos.x * inv)), int(floor(bn.pos.y * inv)))
+			if not grid.has(k):
+				grid[k] = []
+			grid[k].append(bn)
+	if grid.is_empty():
+		return
+	var hold := _aura_hold()
+	var bonus := float(GameData.TYPES["banner"]["aura_bonus"])
+	for b in balls:
+		if b.type == "banner":
+			continue
+		var k := Vector2i(int(floor(b.pos.x * inv)), int(floor(b.pos.y * inv)))
+		var hit := false
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				for bn in grid.get(k + Vector2i(dx, dy), []):
+					if bn.pos.distance_squared_to(b.pos) <= r2:
+						hit = true
+						break
+				if hit:
+					break
+			if hit:
+				break
+		if hit:
+			b.buff_t = hold
+			b.buff = bonus
 
 
 func _process(delta: float) -> void:
@@ -971,7 +1036,6 @@ func _move_ball(b, delta: float) -> void:
 	var wy0 := r
 	var wx1 := wpx - r
 	var wy1 := hpx - r
-	var sniper: bool = b.ti == 2
 	var pierce: bool = b.ti == 3
 	var iter := 0
 	var stalls := 0
@@ -1111,8 +1175,7 @@ func _move_ball(b, delta: float) -> void:
 		if hit >= 0:
 			b.pos = p
 			b.vel = d * speed
-			if _hit_cell(b, hit):
-				continue   # пробойник пролетел насквозь
+			_hit_cell(b, hit)
 		if bnx != 0.0:
 			d.x = -d.x
 		if bny != 0.0:
@@ -1120,57 +1183,50 @@ func _move_ball(b, delta: float) -> void:
 		p += Vector2(bnx, bny) * 0.02
 		if finale:
 			pass   # в финале шары ведёт поле расстояний (см. _sim)
-		elif sniper and (hit >= 0 or st_sup[2] == 1) and time_acc - b.seek_t > 0.15:
-			b.seek_t = time_acc
-			b.pos = p
-			b.vel = d * speed
-			_try_seek(b, Vector2(bnx, bny), hit)
-			d = b.vel.normalized()
 	b.pos = p
 	b.vel = d * speed
 	if b.recent.size() > 40:
 		b.recent.clear()
 
 
-## Возвращает true, если шарик пролетает сквозь квадрат.
-func _hit_cell(b, id: int) -> bool:
+## Удар шара по клетке. Антониевый не бьёт, только отравляет. Остальные: прямой урон (× лихорадка,
+## × бафф Знаменосца), удар по открытым соседям (Никитиевый 25% + бонус стаи всем) и яд от бонуса стаи.
+func _hit_cell(b, id: int) -> void:
 	Sfx.play("hit", 0.15)
+	if b.type == "poison":
+		_apply_poison(id, _poison_ticks(), b)
+		return
 	var ti: int = b.ti
-	var dmg := st_dmg[ti] * (2 if frenzy_t > 0.0 else 1)
-	var lvl := st_lvl[ti]
-	var sup := st_sup[ti] == 1
-	match ti:
-		0:
-			if randf() < 0.06 * lvl:
-				dmg *= 5 if sup else 2
-			_damage(id, dmg, b)
-		1:
-			_damage(id, dmg, b)
-			var sd := maxi(1, int(round(dmg * (0.3 + 0.14 * lvl))))
-			var rad := 2 if sup else 1
-			var cx := id % W
-			@warning_ignore("integer_division")
-			var cy := id / W
-			for yy in range(maxi(0, cy - rad), mini(H - 1, cy + rad) + 1):
-				for xx in range(maxi(0, cx - rad), mini(W - 1, cx + rad) + 1):
-					if xx != cx or yy != cy:
-						_damage(yy * W + xx, sd, b)
-		3:
-			# пролетает сквозь добитый квадрат; с «Призраком» — сквозь любой видимый,
-			# но в туман не уходит: от скрытых квадратов отскакивает
-			var before := _hp_of(id)
-			var visible := _vis_id(id)
-			_damage(id, dmg, b)
-			if dmg >= before or (sup and visible):
-				b.recent[id] = time_acc
-				return true
-		4:
-			_damage(id, dmg, b)
-			if _hp_of(id) > 0:
-				_apply_poison(id, dmg * 0.6, 3.0 + lvl, b)
-		_:
-			_damage(id, dmg, b)
-	return false
+	var mult: float = (2.0 if frenzy_t > 0.0 else 1.0) * ((1.0 + b.buff) if b.buff_t > 0.0 else 1.0)
+	var dmg := maxi(1, int(round(st_dmg[ti] * mult)))
+	_damage(id, dmg, b)
+	var share: float = st_share[ti]
+	if share > 0.0:
+		_smash(id, dmg * share, int(GameData.TYPES[b.type].get("smash_radius", 1)), b)
+	var ps := 0.05 * int(fleet.get("poison", 0))
+	if ps > 0.0 and _hp_of(id) > 0:
+		var ticks := _prob_round(dmg * ps)
+		if ticks > 0:
+			_apply_poison(id, ticks, b)
+
+
+## Дробное число → целое со случайным округлением (в среднем точно): 0.3 → 1 с шансом 30%.
+func _prob_round(x: float) -> int:
+	var i := int(floor(x))
+	return i + (1 if randf() < x - i else 0)
+
+
+## Удар по открытым разрушаемым клеткам вокруг (радиус по Чебышёву), каждой — доля силы.
+func _smash(id: int, amount: float, rad: int, b) -> void:
+	var cx := id % W
+	@warning_ignore("integer_division")
+	var cy := id / W
+	for yy in range(maxi(0, cy - rad), mini(H - 1, cy + rad) + 1):
+		for xx in range(maxi(0, cx - rad), mini(W - 1, cx + rad) + 1):
+			if (xx != cx or yy != cy) and _vis_at(xx, yy):
+				var a := _prob_round(amount)
+				if a > 0:
+					_damage(yy * W + xx, a, b)
 
 
 func _vis_id(id: int) -> bool:
@@ -1187,37 +1243,6 @@ func _hp_of(id: int) -> int:
 		return 0
 	var li := ((y & 31) << 5) | (x & 31)
 	return c.hp[li] if c.kind[li] == 1 else 0
-
-
-func _try_seek(b, n: Vector2, exclude: int) -> void:
-	if randf() >= 0.4 + 0.12 * st_lvl[2]:
-		return
-	var cx := int(b.pos.x * INV)
-	var cy := int(b.pos.y * INV)
-	for r in range(1, 12):
-		var best := -1
-		var bd := INF
-		for yy in range(cy - r, cy + r + 1):
-			var edge_row := (yy == cy - r or yy == cy + r)
-			var xs: Array = range(cx - r, cx + r + 1) if edge_row else [cx - r, cx + r]
-			for xx in xs:
-				if not _vis_at(xx, yy) or _kind_at(xx, yy) != 1:
-					continue
-				var j: int = yy * W + xx
-				if j == exclude:
-					continue
-				var dir: Vector2 = (Vector2(xx, yy) + Vector2(0.5, 0.5)) * CELL - b.pos
-				if dir.dot(n) <= 0.0:
-					continue
-				var dd := dir.length_squared()
-				if dd < bd:
-					bd = dd
-					best = j
-		if best >= 0:
-			@warning_ignore("integer_division")
-			var tc := (Vector2(best % W, best / W) + Vector2(0.5, 0.5)) * CELL
-			b.vel = (tc - b.pos).normalized() * b.vel.length()
-			return
 
 
 func _damage(id: int, amount: int, b) -> void:
@@ -1271,21 +1296,18 @@ func _on_destroyed(x: int, y: int, id: int) -> void:
 		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "×2!", "t": 1.5})
 		Sfx.play("gold", 0.0)
 	if poisons.has(id):
-		var p: Dictionary = poisons[id]
 		poisons.erase(id)
-		if st_sup[4] == 1:
-			for o in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-				var j: int = (y + o.y) * W + x + o.x
-				if x + o.x >= 0 and x + o.x < W and y + o.y >= 0 and y + o.y < H and _hp_of(j) > 0:
-					_apply_poison(j, p["dps"], p["dur"], p["ball"])
 
 
-func _apply_poison(id: int, dps: float, dur: float, b) -> void:
-	var old := 0.0
+## Яд (как в pixel-rikoshet): клетка считает оставшиеся тики; каждый удар прибавляет тики,
+## урон и частоту тика задаёт первый отравивший. Тик снимает 1 HP (× «Наследие», × лихорадка).
+func _apply_poison(id: int, ticks: int, b) -> void:
 	if poisons.has(id):
-		old = poisons[id]["dps"]
-	poisons[id] = {"dps": maxf(dps, old), "t": dur, "dur": dur, "acc": 0.0, "ball": b}
-	_mark_cell(id)
+		poisons[id]["left"] += ticks
+	else:
+		poisons[id] = {"left": ticks, "acc": 0.0, "rate": _poison_rate(), "ball": b,
+			"dmg": maxi(1, int(round(GameData.dmg_mult())))}
+		_mark_cell(id)
 
 
 func _tick_poison(dt: float) -> void:
@@ -1293,13 +1315,12 @@ func _tick_poison(dt: float) -> void:
 		if not poisons.has(id):
 			continue
 		var p: Dictionary = poisons[id]
-		p["t"] -= dt
-		p["acc"] += p["dps"] * dt
-		if p["acc"] >= 1.0:
-			var d := int(p["acc"])
-			p["acc"] -= d
-			_damage(id, d, p["ball"])
-		if poisons.has(id) and (p["t"] <= 0.0 or _hp_of(id) <= 0):
+		p["acc"] += p["rate"] * dt
+		while p["acc"] >= 1.0 and p["left"] > 0 and poisons.has(id):
+			p["acc"] -= 1.0
+			p["left"] -= 1
+			_damage(id, int(p["dmg"]) * (2 if frenzy_t > 0.0 else 1), p["ball"])
+		if poisons.has(id) and (p["left"] <= 0 or _hp_of(id) <= 0):
 			poisons.erase(id)
 			_mark_cell(id)
 
@@ -1477,9 +1498,14 @@ func _redraw_dirty() -> void:
 func _draw_balls() -> void:
 	# на экране шарик не меньше 11 пикселей, иначе его не видно при отдалении
 	var min_d := 11.0 / zoom
+	var ar := _aura_radius()
+	var acol: Color = colors["banner"]
+	acol.a = 0.35
 	for b in balls:
 		var dd: float = maxf(b.radius * 2.6, min_d)
 		ball_layer.draw_texture_rect(ball_tex, Rect2(b.pos.x - dd * 0.5, b.pos.y - dd * 0.5, dd, dd), false, colors[b.type])
+		if b.type == "banner" and lod == 0:
+			ball_layer.draw_arc(b.pos, ar, 0.0, TAU, 40, acol, 1.5 / zoom)
 
 
 func _hp_color(h: int) -> Color:
@@ -2092,36 +2118,39 @@ func _fire(from = null) -> void:
 		return
 	coins -= c
 	counts[t] += 1
+	_recalc_stats()   # бонусы стаи считаются по числу купленных
 	last_launch = lp
 	_spawn_ball(t, aim_angle, lp)
 	Sfx.play("launch")
 	_refresh_ui()
 
 
-func _buy_dmg(t: String) -> void:
-	var c := _dmg_cost(t)
-	if coins < c:
+## Купить уровень ветки за монеты. Скорость сразу меняется у летящих шаров.
+func _buy_track(t: String, id: String) -> void:
+	var c := _track_cost(t, id)
+	if coins < c or not unl[t]:
 		return
 	coins -= c
-	dmg_lvl[t] += 1
+	tlvl[t][id] = _tl(t, id) + 1
 	Sfx.play("buy", 0.04)
 	_recalc_stats()
+	_resync_speeds()
 	_refresh_ui()
 
 
-func _buy_spd(t: String) -> void:
-	var c := _spd_cost(t)
-	if coins < c or int(spd_lvl[t]) >= SPD_MAX:
-		return
-	coins -= c
-	spd_lvl[t] += 1
-	Sfx.play("buy", 0.04)
-	_recalc_stats()
-	var sp := _speed(t)
+func _resync_speeds() -> void:
 	for b in balls:
-		if b.type == t:
-			b.vel = b.vel.normalized() * sp
-	_refresh_ui()
+		b.vel = b.vel.normalized() * _speed(b.type)
+
+
+## Открыть тип шара за 1 U на этом уровне.
+func _unlock_type(t: String) -> void:
+	if unl[t] or run_u < 1:
+		return
+	run_u -= 1
+	unl[t] = true
+	Sfx.play("gold", 0.0)
+	_rebuild_rows()
 
 
 ## «Сброс» — переключатель: следующий выстрел рогаткой бесплатно перезапускает шар выбранного типа,
@@ -2156,30 +2185,6 @@ func _relaunch_idler(p: Vector2) -> void:
 			b.earned = 0
 	reset_cd[t] = RESET_CD
 	last_launch = p
-	_refresh_ui()
-
-
-## Купить узел дерева умений за U-баллы уровня (нужны предыдущие узлы ветки).
-func _tree_can_buy(t: String, node: int) -> bool:
-	if tree[t][node] or not GameData.unlocked[t] or run_u < TREE_COST[node]:
-		return false
-	for r in TREE_REQ[node]:
-		if not tree[t][r]:
-			return false
-	return true
-
-
-func _tree_buy(t: String, node: int) -> void:
-	if not _tree_can_buy(t, node):
-		return
-	run_u -= TREE_COST[node]
-	tree[t][node] = true
-	Sfx.play("gold" if node == 7 else "buy", 0.04)
-	_recalc_stats()
-	var sp := _speed(t)
-	for b in balls:
-		if b.type == t:
-			b.vel = b.vel.normalized() * sp
 	_refresh_ui()
 
 
@@ -2471,7 +2476,7 @@ func _build_ui() -> void:
 		ts.target = sc
 		upg.add_child(ts)
 	tabs.set_tab_title(0, tr("  Шарики  "))
-	tabs.set_tab_title(1, tr("  Умения  "))
+	tabs.set_tab_hidden(1, true)   # вторая вкладка — «Эволюции» (следующий этап переноса из pixel-rikoshet)
 	var bclose := _button(tr("Вернуться к игре"), "AccentButton", 60)
 	bclose.pressed.connect(_show_upgrades.bind(false))
 	uv.add_child(bclose)
@@ -2564,12 +2569,12 @@ func _rebuild_rows() -> void:
 	perk_refs.clear()
 	chips.clear()
 	chip_group = ButtonGroup.new()
-	if not GameData.unlocked[selected]:
+	if not unl[selected]:
 		selected = "basic"
 
 	for t in GameData.TYPE_ORDER:
 		var def: Dictionary = GameData.TYPES[t]
-		var unlocked: bool = GameData.unlocked[t]
+		var unlocked: bool = unl[t]
 
 		# --- фишка выбора шара: значок и число шаров сверху, цена снизу (влезают все 5 типов)
 		if unlocked:
@@ -2610,7 +2615,7 @@ func _rebuild_rows() -> void:
 			chip.set_meta("cnt", cnt)
 			chip.set_meta("price", price)
 
-		# --- карточка магазина
+		# --- карточка шара: описание, бонус стаи, ветки за монеты; закрытый — «Открыть · 1 U»
 		var card := PanelContainer.new()
 		card.theme_type_variation = "Card"
 		shop_box.add_child(card)
@@ -2621,63 +2626,32 @@ func _rebuild_rows() -> void:
 		var sd := _label(tr(def["desc"]), "Muted")
 		sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		cv.add_child(sd)
+		var fl := _label("", "Muted")
+		fl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		fl.add_theme_color_override("font_color", def["color"].lerp(Color.WHITE, 0.35))
+		cv.add_child(fl)
 		if unlocked:
-			var row := HBoxContainer.new()
-			row.add_theme_constant_override("separation", 8)
-			cv.add_child(row)
-			shop_refs[t] = {
-				"extra": extra,
-				"dmg": _price_btn(row, tr("Урон"), ic_coin, _buy_dmg.bind(t)),
-				"spd": _price_btn(row, tr("Скорость"), ic_coin, _buy_spd.bind(t)),
-			}
+			var trs := {}
+			for tr_ in def["tracks"]:
+				var row := HBoxContainer.new()
+				row.add_theme_constant_override("separation", 10)
+				cv.add_child(row)
+				var cap := _label("", "")
+				cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				row.add_child(cap)
+				var bt := _button("", "", 62, ic_coin)
+				bt.custom_minimum_size.x = 170
+				bt.pressed.connect(_buy_track.bind(t, tr_["id"]))
+				row.add_child(bt)
+				trs[tr_["id"]] = {"label": cap, "button": bt}
+			shop_refs[t] = {"extra": extra, "fleet": fl, "tracks": trs}
 		else:
-			card.modulate = Color(1, 1, 1, 0.6)
-			extra.text = tr("Откройте в «Наследии»")
-
-		# --- дерево умений: основа → две ветки по 3 узла → суперспособность
-		var pc := PanelContainer.new()
-		pc.theme_type_variation = "Card"
-		perk_box.add_child(pc)
-		var pv := VBoxContainer.new()
-		pv.add_theme_constant_override("separation", 8)
-		pc.add_child(pv)
-		_card_head(pv, t, not unlocked)
-		var d1 := _label(tr("«%s» — %s") % [tr(def["perk"]), tr(def["perk_desc"])], "Muted")
-		d1.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		pv.add_child(d1)
-		var d2 := _label(tr("Супер «%s» — %s") % [tr(def["super"]), tr(def["super_desc"])], "Muted")
-		d2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		pv.add_child(d2)
-		if not unlocked:
-			pv.add_child(_label(tr("Откройте в «Наследии»"), "Muted"))
-			pc.modulate = Color(1, 1, 1, 0.6)
-			continue
-		var nodes := []
-		for k in 8:
-			var nb := _button("", "", 62)
-			nb.add_theme_font_size_override("font_size", 23)
-			nb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			nb.pressed.connect(_tree_buy.bind(t, k))
-			nodes.append(nb)
-		var r0 := HBoxContainer.new()
-		r0.alignment = BoxContainer.ALIGNMENT_CENTER
-		pv.add_child(r0)
-		nodes[0].size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		nodes[0].custom_minimum_size.x = 320
-		r0.add_child(nodes[0])
-		for k in 3:
-			var rr := HBoxContainer.new()
-			rr.add_theme_constant_override("separation", 8)
-			pv.add_child(rr)
-			rr.add_child(nodes[1 + k])
-			rr.add_child(nodes[4 + k])
-		var r4 := HBoxContainer.new()
-		r4.alignment = BoxContainer.ALIGNMENT_CENTER
-		pv.add_child(r4)
-		nodes[7].size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		nodes[7].custom_minimum_size.x = 380
-		r4.add_child(nodes[7])
-		perk_refs[t] = nodes
+			card.modulate = Color(1, 1, 1, 0.75)
+			var ub := _button(tr("Открыть · 1 U"), "AccentButton", 62, ic_gem)
+			ub.pressed.connect(_unlock_type.bind(t))
+			cv.add_child(ub)
+			shop_refs[t] = {"extra": extra, "fleet": fl, "unlock": ub}
 	_refresh_ui()
 
 
@@ -2725,44 +2699,48 @@ func _refresh_ui() -> void:
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
 		r["extra"].text = tr("шаров на карте: %d") % counts[t]
-		var dc := _dmg_cost(t)
-		r["dmg"]["label"].text = tr("Урон %d → %d") % [_damage_of(t), _damage_of_next(t)]
-		r["dmg"]["button"].text = GameData.fmt(dc)
-		r["dmg"]["button"].disabled = coins < dc
-		var sl := int(spd_lvl[t])
-		var cps := _speed(t) / CELL
-		if sl >= SPD_MAX:
-			r["spd"]["label"].text = tr("Скорость %.1f кл/с") % cps
-		else:
-			spd_lvl[t] += 1
-			var nxt := _speed(t) / CELL
-			spd_lvl[t] -= 1
-			r["spd"]["label"].text = tr("Скорость %.1f → %.1f кл/с") % [cps, nxt]
-		if sl >= SPD_MAX:
-			r["spd"]["button"].text = tr("макс.")
-			r["spd"]["button"].disabled = true
-		else:
-			var scost := _spd_cost(t)
-			r["spd"]["button"].text = GameData.fmt(scost)
-			r["spd"]["button"].disabled = coins < scost
+		r["fleet"].text = _fleet_text(t)
+		if r.has("unlock"):
+			r["unlock"].disabled = run_u < 1
+			continue
+		for id in r["tracks"]:
+			var cost := _track_cost(t, id)
+			r["tracks"][id]["label"].text = _track_caption(t, id)
+			r["tracks"][id]["button"].text = GameData.fmt(cost)
+			r["tracks"][id]["button"].disabled = coins < cost
 
-	var roman := ["I", "II", "III"]
-	for t in perk_refs:
-		var nodes: Array = perk_refs[t]
-		var def: Dictionary = GameData.TYPES[t]
-		for k in 8:
-			var name := ""
-			if k == 0:
-				name = tr("Основа")
-			elif k <= 3:
-				name = "«%s» %s" % [tr(def["perk"]), roman[k - 1]]
-			elif k <= 6:
-				name = "%s %s" % [tr("Скорость"), roman[k - 4]]
-			else:
-				name = "★ «%s»" % tr(def["super"])
-			var owned: bool = tree[t][k]
-			var btn: Button = nodes[k]
-			btn.text = name if owned else "%s · %d" % [name, TREE_COST[k]]
-			btn.icon = null if owned else ic_gem
-			btn.theme_type_variation = "AccentButton" if owned else ""
-			btn.disabled = not owned and not _tree_can_buy(t, k)
+
+## Подпись ветки: «Скорость 8.2 → 9.9 кл/с», «Сила удара 1 → 2», …
+func _track_caption(t: String, id: String) -> String:
+	var lv := _tl(t, id)
+	match id:
+		"speed":
+			var now := _speed(t) / CELL
+			tlvl[t][id] = lv + 1
+			var nxt := _speed(t) / CELL
+			tlvl[t][id] = lv
+			return tr("Скорость %.1f → %.1f кл/с") % [now, nxt]
+		"impact":
+			return "%s %d → %d" % [tr("Сила удара"), _damage_of(t), _damage_of(t, lv + 1)]
+		"ticks":
+			return "%s %d → %d" % [tr("Количество тиков"), _poison_ticks(), _poison_ticks() + 1]
+		"cadence":
+			return "%s %.1f → %.1f" % [tr("Частота тиков яда"), _poison_rate(), _poison_rate() + 0.5]
+		"radius":
+			var rc := _aura_radius() / CELL
+			return "%s %d → %d" % [tr("Радиус ауры"), int(rc), int(rc) + 1]
+		"hold":
+			return "%s %.1f → %.1f" % [tr("Длительность бафа"), _aura_hold(), _aura_hold() + 0.5]
+	return id
+
+
+## Строка бонуса стаи: ступень, что даёт сейчас, сколько шаров до следующей.
+func _fleet_text(t: String) -> String:
+	var f: String = GameData.TYPES[t]["fleet"]
+	var n := int(counts[t])
+	var k := GameData.fleet_steps(n)
+	var val := k if f == "flat" else 5 * k
+	var txt := tr("Бонус стаи %d/9") % k + ": " + tr(GameData.FLEET_DESC[f]) % val
+	if k < GameData.FLEET_STEPS.size():
+		txt += " · " + tr("до следующей ещё %d") % (GameData.FLEET_STEPS[k] - n)
+	return txt

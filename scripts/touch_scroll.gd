@@ -11,6 +11,7 @@ var _idx := -1
 var _start := Vector2.ZERO
 var _v0 := 0
 var _on := false
+var _held: Array = []   # кнопки, временно выключенные на время прокрутки
 
 
 func _input(e: InputEvent) -> void:
@@ -29,19 +30,28 @@ func _input(e: InputEvent) -> void:
 			if _on:
 				_on = false
 				get_viewport().set_input_as_handled()
+				_release_held.call_deferred()
 	elif e is InputEventScreenDrag and e.index == _idx:
 		var dy: float = e.position.y - _start.y
 		if not _on and absf(dy) > SLOP:
-			# отменяем нажатие кнопки: «отпускаем» мышь далеко за экраном — кнопка не сработает
-			var r := InputEventMouseButton.new()
-			r.button_index = MOUSE_BUTTON_LEFT
-			r.pressed = false
-			r.position = Vector2(-10000, -10000)
-			r.global_position = r.position
-			Input.parse_input_event(r)
+			# отменяем нажатие кнопки под пальцем: выключенная кнопка сбрасывает нажатие и не сработает
+			# при отпускании (синтетическое «отпускание мыши» Godot обрабатывал уже после настоящего — v0.26)
+			for b in target.find_children("*", "BaseButton", true, false):
+				if not b.disabled and b.is_visible_in_tree() and b.get_global_rect().has_point(_start):
+					b.disabled = true
+					_held.append(b)
 			_on = true
 		if _on:
 			target.scroll_vertical = _v0 - int(dy)
 			get_viewport().set_input_as_handled()
-	elif _on and e is InputEventMouse and e.device == InputEvent.DEVICE_ID_EMULATION:
+	elif (_on or not _held.is_empty()) and e is InputEventMouse and e.device == InputEvent.DEVICE_ID_EMULATION:
 		get_viewport().set_input_as_handled()   # эмулированная мышь во время прокрутки не трогает кнопки
+
+
+## После отпускания пальца кнопки снова включаются (в следующем кадре — когда эмулированная мышь уже прошла).
+func _release_held() -> void:
+	await get_tree().process_frame
+	for b in _held:
+		if is_instance_valid(b):
+			b.disabled = false
+	_held.clear()

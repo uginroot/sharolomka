@@ -1,58 +1,84 @@
 extends Node
-## Глобальные данные: типы шариков, U-баллы, перки, открытые карты, сохранения.
+## Глобальные данные: типы шариков, «Наследие», открытые карты, профили, сохранения.
 
 const I18n = preload("res://scripts/i18n.gd")
 const LANGS := I18n.LANGS
 const LANG_NAMES := I18n.NAMES
-const TYPE_ORDER := ["basic", "splash", "sniper", "pierce", "poison"]
+## Шесть шаров с ясными ролями — перенесены из pixel-rikoshet («Глубинный пиксель»), v0.26.
+## Внутренние id прежние (на них держатся сохранения): basic = Пронизывающий, sniper = Гесиевый,
+## splash = Никитиевый, poison = Антониевый, banner = Знаменосец, pierce = Отбойник.
+## Порядок как там: orange, pink, red, green, banner, golden.
+const TYPE_ORDER := ["basic", "sniper", "splash", "poison", "banner", "pierce"]
 
+## Ветки прокачки за монеты: value — прибавка за уровень; prices — заданные цены, дальше ×1.7 за уровень.
+const TRACK_SPEED := {"id": "speed", "name": "Скорость", "value": 0.2, "prices": [50, 117, 250]}
+const TRACK_IMPACT := {"id": "impact", "name": "Сила удара", "value": 1.0, "prices": [50, 112, 240]}
+
+## fleet — что тип раздаёт всем шарам за каждую ступень купленных (5, 10, 20…80): +5% или +1.
 const TYPES := {
 	"basic": {
-		"name": "Обычный",
-		"desc": "Рабочая лошадка: дешёвый и надёжный, бьёт по одному квадрату. Основа дохода в начале — берите побольше.", "color": Color(0.95, 0.95, 0.95), "radius": 7.0,
-		"speed": 330.0, "damage": 1.0,
-		"ball_cost": 25.0, "dmg_cost": 40.0, "spd_cost": 30.0, "unlock_u": 0,
-		"perk": "Крит", "perk_desc": "+6% шанс двойного урона за уровень",
-		"super": "Сокрушение", "super_desc": "Крит наносит ×5 урона вместо ×2",
-	},
-	"splash": {
-		"name": "Бомба",
-		"desc": "При ударе взрывается и задевает соседние квадраты. Лучший выбор против плотных стен из квадратов.", "color": Color(1.0, 0.6, 0.2), "radius": 8.0,
-		"speed": 280.0, "damage": 2.0,
-		"ball_cost": 300.0, "dmg_cost": 250.0, "spd_cost": 200.0, "unlock_u": 1,
-		"perk": "Ударная волна", "perk_desc": "Взрыв бьёт соседей: 30% урона +14% за уровень",
-		"super": "Мегавзрыв", "super_desc": "Радиус взрыва 2 клетки",
+		"name": "Пронизывающий", "desc": "Базовый шар: бьёт клетку, в которую попал, и отскакивает.",
+		"color": Color(1.0, 0.58, 0.2), "radius": 7.0, "speed": 330.0, "damage": 1.0, "launch_base": 4.0,
+		"tracks": [TRACK_SPEED, TRACK_IMPACT], "fleet": "points",
 	},
 	"sniper": {
-		"name": "Снайпер",
-		"desc": "Быстрый и сильный. После удара сам наводится на ближайший видимый квадрат — не тратит время в пустых коридорах.", "color": Color(0.35, 0.9, 1.0), "radius": 6.0,
-		"speed": 380.0, "damage": 3.0,
-		"ball_cost": 1500.0, "dmg_cost": 1000.0, "spd_cost": 800.0, "unlock_u": 3,
-		"perk": "Наведение", "perk_desc": "После удара летит к ближайшему квадрату: шанс 40% +12% за уровень",
-		"super": "Охотник", "super_desc": "Наводится и после отскока от стен",
+		"name": "Гесиевый", "desc": "Быстро летает и чаще успевает ударить по породе.",
+		"color": Color(1.0, 0.45, 0.72), "radius": 6.0, "speed": 660.0, "damage": 1.0, "launch_base": 50.0,
+		"tracks": [TRACK_SPEED, TRACK_IMPACT], "fleet": "speed",
 	},
-	"pierce": {
-		"name": "Пробойник",
-		"desc": "Добив квадрат, летит дальше сквозь него. Прорубает длинные туннели вглубь карты и в полости картинок.", "color": Color(0.75, 0.5, 1.0), "radius": 7.0,
-		"speed": 340.0, "damage": 6.0,
-		"ball_cost": 6000.0, "dmg_cost": 4000.0, "spd_cost": 3000.0, "unlock_u": 5,
-		"perk": "Заточка", "perk_desc": "+20% урона за уровень. Пролетает сквозь квадрат, если добил его",
-		"super": "Призрак", "super_desc": "Пролетает сквозь все видимые квадраты",
+	"splash": {
+		"name": "Никитиевый", "desc": "Бьёт клетку на полную силу, а открытые клетки рядом — на 25% этой силы.",
+		"color": Color(0.95, 0.3, 0.3), "radius": 7.0, "speed": 330.0, "damage": 1.0, "launch_base": 50.0,
+		"smash_share": 0.25, "smash_radius": 1,
+		"tracks": [TRACK_SPEED, {"id": "impact", "name": "Сила удара", "value": 1.0, "prices": [50, 96]}], "fleet": "splash",
 	},
 	"poison": {
-		"name": "Отравитель",
-		"desc": "Отравляет квадрат, и тот теряет жизни ещё несколько секунд. Хорош против квадратов с большим запасом жизней.", "color": Color(0.45, 1.0, 0.35), "radius": 7.0,
-		"speed": 300.0, "damage": 4.0,
-		"ball_cost": 20000.0, "dmg_cost": 12000.0, "spd_cost": 9000.0, "unlock_u": 8,
-		"perk": "Стойкий яд", "perk_desc": "Яд 60% урона в секунду, 3 с +1 с за уровень",
-		"super": "Эпидемия", "super_desc": "Яд перекидывается на соседей, когда квадрат разбит",
+		"name": "Антониевый", "desc": "Сам породу не бьёт, только отравляет её при ударе. Яд копится на клетке.",
+		"color": Color(0.4, 0.88, 0.42), "radius": 7.0, "speed": 330.0, "damage": 0.0, "launch_base": 50.0,
+		"poison_ticks": 1, "poison_rate": 1.0,
+		"tracks": [TRACK_SPEED,
+			{"id": "ticks", "name": "Количество тиков", "value": 1.0, "prices": [50, 112, 233]},
+			{"id": "cadence", "name": "Частота тиков яда", "value": 0.5, "prices": [50, 106, 217, 389]}],
+		"fleet": "poison",
+	},
+	"banner": {
+		"name": "Знаменосец", "desc": "Шары, которых коснулся его круг, ещё секунду бьют сильнее. Полезен, когда шаров много.",
+		"color": Color(0.78, 0.62, 1.0), "radius": 7.0, "speed": 330.0, "damage": 1.0, "launch_base": 50.0,
+		"aura_radius": 3.0, "aura_bonus": 0.3, "aura_hold": 1.0,
+		"tracks": [TRACK_SPEED,
+			{"id": "radius", "name": "Радиус ауры", "value": 1.0, "prices": [50, 100, 170]},
+			{"id": "hold", "name": "Длительность бафа", "value": 0.5, "prices": [50, 100, 170]}],
+		"fleet": "damage",
+	},
+	"pierce": {
+		"name": "Отбойник", "desc": "Бьёт сильно: базовый удар снимает 8 HP. Для крепкой породы.",
+		"color": Color(0.35, 0.58, 1.0), "radius": 8.0, "speed": 330.0, "damage": 8.0, "launch_base": 50.0,
+		"tracks": [TRACK_SPEED, {"id": "impact", "name": "Сила удара", "value": 3.0, "prices": [50, 98, 185]}],
+		"fleet": "flat",
 	},
 }
+
+## Бонусы стаи: ступени по числу купленных шаров типа (решение автора pixel-rikoshet).
+const FLEET_STEPS := [5, 10, 20, 30, 40, 50, 60, 70, 80]
+## Описание бонуса стаи по виду: %d — текущая прибавка.
+const FLEET_DESC := {
+	"points": "+%d%% монет", "speed": "+%d%% скорости всем", "splash": "+%d%% удара по соседям всем",
+	"poison": "+%d%% урона ядом всем", "damage": "+%d%% урона всем", "flat": "+%d к удару всем",
+}
+
+
+static func fleet_steps(count: int) -> int:
+	var k := 0
+	for s in FLEET_STEPS:
+		if count >= s:
+			k += 1
+	return k
+
 
 # ---------------------------------------------------------------- прогресс профиля (слота)
 var stars := 0               # ★ — за завершение уровней, тратятся в «Наследии»
 var meta := {}               # постоянные улучшения: id → уровень
-var unlocked := {}           # открытые типы шаров (вычисляется из «Арсенала»)
+var unlocked := {}           # типы, открытые на старте уровня (только Пронизывающий)
 var maps_unlocked := 1
 var maps_done := {}
 var map_states := {}
@@ -79,10 +105,6 @@ const SETTINGS_PATH := "user://settings.json"
 ## «Наследие» — постоянные улучшения за ★. Ветки — цепочки: узел требует предыдущий (req).
 ## max 0 — без предела; цена = cost + step·уровень.
 const META := [
-	{"id": "splash", "branch": "Арсенал", "max": 1, "cost": 1, "step": 0, "req": ""},
-	{"id": "sniper", "branch": "Арсенал", "max": 1, "cost": 2, "step": 0, "req": "splash"},
-	{"id": "pierce", "branch": "Арсенал", "max": 1, "cost": 4, "step": 0, "req": "sniper"},
-	{"id": "poison", "branch": "Арсенал", "max": 1, "cost": 6, "step": 0, "req": "pierce"},
 	{"id": "coin_bonus", "branch": "Казна", "name": "Бонус монет", "desc": "+10% монет", "max": 0, "cost": 1, "step": 1, "req": ""},
 	{"id": "start_coins", "branch": "Казна", "name": "Стартовые монеты", "desc": "Монеты на старте уровня", "max": 5, "cost": 2, "step": 1, "req": "coin_bonus"},
 	{"id": "dmg_bonus", "branch": "Сила", "name": "Урон", "desc": "+10% урона всех шаров", "max": 0, "cost": 1, "step": 1, "req": ""},
@@ -92,7 +114,10 @@ const META := [
 	{"id": "start_balls", "branch": "Старт", "name": "Стартовые шары", "desc": "+1 бесплатный шар на старте", "max": 5, "cost": 3, "step": 1, "req": ""},
 	{"id": "gold", "branch": "Старт", "name": "Золотые квадраты", "desc": "+20% золотых квадратов", "max": 5, "cost": 2, "step": 1, "req": "start_balls"},
 ]
-const META_BRANCHES := ["Арсенал", "Казна", "Сила", "Удача", "Старт"]
+const META_BRANCHES := ["Казна", "Сила", "Удача", "Старт"]
+## «Арсенал» (открытие типов за ★) убран в v0.26: типы открываются внутри уровня за 1 U, как в pixel-rikoshet.
+## Потраченные на него ★ возвращаются при загрузке (принцип «за убранное возвращаем ресурс»).
+const ARSENAL_REFUND := {"splash": 1, "sniper": 2, "pierce": 4, "poison": 6}
 
 
 func meta_def(id: String) -> Dictionary:
@@ -133,9 +158,10 @@ func meta_buy(id: String) -> bool:
 	return true
 
 
+## Открытые типы — по умолчанию для нового уровня: только Пронизывающий (остальные — за 1 U в уровне).
 func refresh_unlocked() -> void:
 	for t in TYPE_ORDER:
-		unlocked[t] = t == "basic" or meta_level(t) > 0
+		unlocked[t] = t == "basic"
 
 
 ## Эффекты «Наследия».
@@ -269,6 +295,9 @@ func load_game() -> void:
 	# повреждённый или чужой файл не должен ронять игру: каждое поле проверяем по типу
 	stars = _int(data.get("stars", 0))
 	var mt: Dictionary = _dict(data.get("meta", {}))
+	for t in ARSENAL_REFUND:
+		if _int(mt.get(t, 0)) > 0:
+			stars += ARSENAL_REFUND[t]
 	for m in META:
 		var lv := _int(mt.get(m["id"], 0))
 		if int(m["max"]) > 0:

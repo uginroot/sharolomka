@@ -109,7 +109,7 @@ const LAYOUTS := ["rings", "rays", "spiral", "checker", "mosaic"]
 
 const HP_BASE := 4.0
 const HP_STEP := 0.35
-const GOAL_BASE := 150000
+const GOAL_BASE := 200000
 const GOAL_STEP := 0.05
 
 
@@ -134,16 +134,16 @@ static func get_maps() -> Array:
 			"hp_base": 2.0, "hp_growth": 0.12, "goal": 0, "region": 30, "density": 0.85,
 			"templates": ["tree", "house", "heart", "mushroom"]},
 		{"id": "yard", "layout": "rings", "u_rate": 5, "name": "Кошачий двор", "w": 300, "h": 360, "aim": -70.0,
-			"hp_base": 2.5, "hp_growth": 0.06, "goal": 25000, "region": 40, "density": 0.75,
+			"hp_base": 2.5, "hp_growth": 0.06, "goal": 50000, "region": 40, "density": 0.75,
 			"templates": ["cat", "yarn", "fish", "house", "heart"]},
 		{"id": "mountains", "layout": "rays", "u_rate": 3, "name": "Горы", "w": 1000, "h": 1200, "aim": -70.0,
-			"hp_base": 3.0, "hp_growth": 0.03, "goal": 80000, "region": 48, "density": 0.7,
+			"hp_base": 3.0, "hp_growth": 0.03, "goal": 180000, "region": 48, "density": 0.7,
 			"templates": ["mountain", "moon", "star", "tree", "mushroom"]},
 		{"id": "ocean", "layout": "spiral", "u_rate": 2, "name": "Океан", "w": 3000, "h": 3600, "aim": -70.0,
-			"hp_base": 3.5, "hp_growth": 0.02, "goal": 150000, "region": 56, "density": 0.65,
+			"hp_base": 3.5, "hp_growth": 0.02, "goal": 230000, "region": 56, "density": 0.65,
 			"templates": ["fish", "star", "moon", "heart", "yarn"]},
 		{"id": "night", "layout": "rings", "u_rate": 2, "name": "Звёздная ночь", "w": 10000, "h": 10000, "aim": -70.0,
-			"hp_base": 4.0, "hp_growth": 0.015, "goal": 200000, "region": 64, "density": 0.65,
+			"hp_base": 4.0, "hp_growth": 0.015, "goal": 280000, "region": 64, "density": 0.65,
 			"templates": all},
 	]
 
