@@ -92,6 +92,14 @@ var coins := 0
 var counts := {}
 var tlvl := {}                   # ветки за монеты: тип → {id ветки: уровень} (сбрасывается каждый уровень)
 var unl := {}                    # открытые типы на этом уровне (за 1 U)
+var evo := {}                    # эволюции на этом уровне: тип → {id: true}
+var elvl := {}                   # ветки эволюций: тип → {id ветки: уровень}
+var extra := {}                  # шары сверх оплаченных пусков (залпы Дробовика): тип → число
+var poison_hops := {}            # Инфекция: клетка → сколько переходов яд уже сделал
+var corr_until := {}             # Разъедание: клетка → до какого времени ещё уязвима
+var zaps := []                   # вспышки молний для отрисовки
+var evo_refs := {}               # вкладка «Эволюции»: тип → {эволюция: кнопки}
+var aura_r_now := 0.0            # текущий радиус ауры (с боевым кличем) — для отрисовки
 var fleet := {}                  # бонусы стаи: вид → число ступеней
 var aura_t := 0.0
 var reset_cd := {}
@@ -196,6 +204,9 @@ func _ready() -> void:
 		t_idx[t] = ti
 		counts[t] = 0
 		tlvl[t] = {}
+		evo[t] = {}
+		elvl[t] = {}
+		extra[t] = 0
 		unl[t] = bool(GameData.unlocked.get(t, t == "basic"))
 		reset_cd[t] = 0.0
 		colors[t] = GameData.TYPES[t]["color"]
@@ -729,6 +740,14 @@ func _load_state() -> float:
 		for k in d:
 			tlvl[t][String(k)] = int(d[k])
 		unl[t] = t == "basic" or bool(ul.get(t, false))
+		var ev: Dictionary = s.get("evo", {}).get(t, {})
+		for k in ev:
+			if not GameData.evo_def(t, String(k)).is_empty():
+				evo[t][String(k)] = true
+		var el: Dictionary = s.get("elvl", {}).get(t, {})
+		for k in el:
+			elvl[t][String(k)] = clampi(int(el[k]), 0, GameData.LADDER_MAX)
+		extra[t] = maxi(0, int(s.get("extra", {}).get(t, 0)))
 	if int(counts["basic"]) == 0:
 		counts["basic"] = 1
 	run_u = int(s.get("u", 0))
@@ -775,6 +794,7 @@ func _save_state() -> void:
 	var s := {
 		"ver": 7, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
 		"counts": counts.duplicate(), "tracks": tlvl.duplicate(true), "unl": unl.duplicate(),
+		"evo": evo.duplicate(true), "elvl": elvl.duplicate(true), "extra": extra.duplicate(),
 		"saved_at": Time.get_unix_time_from_system(), "chunks": out,
 		"balls": balls.map(func(b): return [b.type, b.pos.x, b.pos.y, b.vel.x, b.vel.y]),
 		"last_launch": [last_launch.x, last_launch.y], "aim": aim_angle, "selected": selected,
@@ -811,6 +831,86 @@ const MAX_SPEED := 50.0 * CELL      # предел скорости шара, px
 
 func _tl(t: String, id: String) -> int:
 	return int(tlvl[t].get(id, 0))
+
+
+# ---------------------------------------------------------------- эволюции (за U уровня)
+
+func _has_evo(t: String, id: String) -> bool:
+	return evo[t].has(id)
+
+
+func _el(t: String, track: String) -> int:
+	return int(elvl[t].get(track, 0))
+
+
+## Значение ветки эволюции: base + step·уровень (с нижним пределом min, если задан).
+func _ev(t: String, track: String) -> float:
+	var d := GameData.evo_track(t, track)
+	var v := float(d["base"]) + float(d["step"]) * _el(t, track)
+	return maxf(v, float(d["min"])) if d.has("min") else v
+
+
+## Первая эволюция стоит EVO_COST, вторая — вдвое дороже (как в pixel-rikoshet).
+func _evo_cost(t: String) -> int:
+	return GameData.EVO_COST * (GameData.EVO_LATER_MULT if evo[t].size() >= 1 else 1)
+
+
+func _ladder_cost(t: String, track: String) -> int:
+	return _el(t, track) + 1
+
+
+func _ladder_maxed(t: String, track: String) -> bool:
+	if _el(t, track) >= GameData.LADDER_MAX:
+		return true
+	var d := GameData.evo_track(t, track)
+	return d.has("min") and float(d["base"]) + float(d["step"]) * (_el(t, track) + 1) < float(d["min"]) - 0.001
+
+
+func _buy_evo(t: String, id: String) -> void:
+	if not unl[t] or _has_evo(t, id) or run_u < _evo_cost(t):
+		return
+	run_u -= _evo_cost(t)
+	evo[t][id] = true
+	Sfx.play("gold", 0.0)
+	if id == "shotgun":
+		_shotgun_split()   # каждый Гесиевый на поле сразу становится залпом
+	_recalc_stats()
+	_resync_speeds()
+	_rebuild_rows()
+
+
+func _buy_ladder(t: String, track: String) -> void:
+	var eid := ""
+	for e in GameData.EVOS[t]:
+		for tr_ in e["tracks"]:
+			if tr_["id"] == track:
+				eid = e["id"]
+	if eid == "" or not _has_evo(t, eid) or _ladder_maxed(t, track) or run_u < _ladder_cost(t, track):
+		return
+	run_u -= _ladder_cost(t, track)
+	elvl[t][track] = _el(t, track) + 1
+	Sfx.play("buy", 0.04)
+	_recalc_stats()
+	_resync_speeds()
+	_refresh_ui()
+
+
+## Залп Дробовика: 1 + целая часть «Шаров в залпе».
+func _volley_size() -> int:
+	return 1 + int(floor(_ev("sniper", "shotgun_balls"))) if _has_evo("sniper", "shotgun") else 1
+
+
+func _shotgun_split() -> void:
+	var add := _volley_size() - 1
+	if add <= 0:
+		return
+	for b in balls.duplicate():
+		if b.type == "sniper" and balls.size() < 3000:
+			var base := rad_to_deg(b.vel.angle())
+			for k in add:
+				var off: float = (k + 1) * 9.0 * (1 if k % 2 == 0 else -1)
+				_spawn_ball("sniper", base + off, b.pos)
+				extra["sniper"] += 1
 
 
 func _track_def(t: String, id: String) -> Dictionary:
@@ -876,6 +976,8 @@ func _recalc_stats() -> void:
 		var t: String = GameData.TYPE_ORDER[ti]
 		st_dmg[ti] = _damage_of(t)
 		st_share[ti] = float(GameData.TYPES[t].get("smash_share", 0.0)) + 0.05 * int(fleet["splash"])
+		if t == "splash" and _has_evo(t, "area"):
+			st_share[ti] += _ev(t, "area_share")
 
 
 ## Цена base·growth^n с потолком: без него на больших n float выходит за int64 и цена
@@ -891,7 +993,10 @@ static func _price(base: float, growth: float, n: int) -> int:
 ## Мягкий потолок около 60–70 шаров одного типа; основные монеты уходят в прокачку.
 func _ball_cost(t: String) -> int:
 	var n := int(counts[t])
-	return int(minf(round((float(GameData.TYPES[t]["launch_base"]) + 5.0 * n) * pow(1.12, n)), PRICE_CAP))
+	var p := minf(round((float(GameData.TYPES[t]["launch_base"]) + 5.0 * n) * pow(1.12, n)), PRICE_CAP)
+	if t == "sniper" and _has_evo("sniper", "shotgun"):
+		p *= 1.0 - minf(0.5, _ev("sniper", "shotgun_cheap"))   # «Массовое производство», не больше −50%
+	return maxi(1, int(p))
 
 
 # ================================================================ симуляция
@@ -923,15 +1028,64 @@ func _sim(dt: float) -> void:
 	if aura_t <= 0.0:
 		aura_t = 0.1
 		_update_aura()
+	var sprint_on := _has_evo("sniper", "sprint")
+	var zap_on := _has_evo("splash", "lightning")
+	var grav_on := _has_evo("pierce", "gravity")
+	var drill_on := _has_evo("pierce", "kleshch")
 	for b in balls:
 		if b.buff_t > 0.0:
 			b.buff_t -= dt
+		if sprint_on and b.type == "sniper":
+			b.sprint = minf(_ev("sniper", "sprint_cap"), b.sprint + _ev("sniper", "sprint_rate") * dt)
+		if zap_on and b.type == "splash":
+			b.zap_t -= dt
+			if b.zap_t <= 0.0:
+				b.zap_t += 1.0 / maxf(0.05, _ev("splash", "lightning_rate"))
+				_lightning(b)
+		if b.type == "pierce":
+			if drill_on and b.drill_id >= 0:
+				_drill(b, dt)
+			elif grav_on:
+				b.gt_t -= dt
+				if b.gt_t <= 0.0:
+					b.gt_t = 0.5 + randf() * 0.1
+					b.gtarget = _gravity_target(b)
 		_move_ball(b, dt)
+	if not zaps.is_empty():
+		for z in zaps:
+			z["t"] -= dt
+		zaps = zaps.filter(func(z): return z["t"] > 0.0)
+		overlay_dirty = true
 	if not poisons.is_empty():
 		_tick_poison(dt)
 	for t in reset_cd:
 		if reset_cd[t] > 0.0:
 			reset_cd[t] = maxf(0.0, reset_cd[t] - dt)
+
+
+## Клещ: бурит клетку со скоростью «Хватки» (ударов в секунду). Пробил — «Глубже» ведёт дальше по линии,
+## иначе шар отскакивает обратно; клетки, разбитые с одного удара, в счёт «Глубже» не идут.
+func _drill(b, dt: float) -> void:
+	if _hp_of(b.drill_id) <= 0:
+		_drill_done(b)
+		return
+	b.drill_acc += _ev("pierce", "kleshch_grip") * dt
+	while b.drill_acc >= 1.0 and b.drill_id >= 0:
+		b.drill_acc -= 1.0
+		var mult: float = (2.0 if frenzy_t > 0.0 else 1.0) * ((1.0 + b.buff) if b.buff_t > 0.0 else 1.0)
+		_damage(b.drill_id, maxi(1, int(round(st_dmg[b.ti] * mult))), b)
+		if _hp_of(b.drill_id) <= 0:
+			_drill_done(b)
+
+
+func _drill_done(b) -> void:
+	b.drill_id = -1
+	if b.deeper_left > 0:
+		b.deeper_left -= 1
+		b.vel = b.drill_vel            # «Глубже»: дальше по той же линии
+	else:
+		b.deeper_left = int(_ev("pierce", "kleshch_deeper"))
+		b.vel = -b.drill_vel           # обычный отскок назад из тоннеля
 
 
 ## Аура Знаменосца: шары в круге получают бафф урона и держат его _aura_hold() секунд.
@@ -940,6 +1094,11 @@ func _update_aura() -> void:
 	if int(counts.get("banner", 0)) == 0:
 		return
 	var r := _aura_radius()
+	if _has_evo("banner", "war_banner"):
+		var period := _ev("banner", "war_banner_cry")
+		if fmod(time_acc, period) < 1.0:
+			r *= 2.0   # боевой клич: на секунду круг вдвое шире (у всех Знаменосцев одновременно)
+	aura_r_now = r
 	var r2 := r * r
 	var inv := 1.0 / r
 	var grid := {}
@@ -953,8 +1112,16 @@ func _update_aura() -> void:
 		return
 	var hold := _aura_hold()
 	var bonus := float(GameData.TYPES["banner"]["aura_bonus"])
+	if _has_evo("banner", "war_banner"):
+		bonus += _ev("banner", "war_banner_damage")
+	var sbonus := _ev("banner", "tailwind_speed") if _has_evo("banner", "tailwind") else 0.0
+	var self_share := _ev("banner", "tailwind_self") if _has_evo("banner", "tailwind") else 0.0
 	for b in balls:
 		if b.type == "banner":
+			if self_share > 0.0:
+				b.buff_t = hold
+				b.buff = bonus * minf(1.0, self_share)
+				b.spd_buff = sbonus * minf(1.0, self_share)
 			continue
 		var k := Vector2i(int(floor(b.pos.x * inv)), int(floor(b.pos.y * inv)))
 		var hit := false
@@ -971,6 +1138,7 @@ func _update_aura() -> void:
 		if hit:
 			b.buff_t = hold
 			b.buff = bonus
+			b.spd_buff = sbonus
 
 
 func _process(delta: float) -> void:
@@ -993,7 +1161,7 @@ func _process(delta: float) -> void:
 		border_node.queue_redraw()
 	_hold_tick(delta)
 	# прицел и подсказки перерисовываем, только пока они на экране (и один раз после — чтобы стереть)
-	var active := sling or press_pending or not popups.is_empty()
+	var active := sling or press_pending or not popups.is_empty() or not zaps.is_empty()
 	if active or overlay_dirty or sling_view.get_meta("was", false):
 		overlay.queue_redraw()
 		sling_view.queue_redraw()
@@ -1025,12 +1193,21 @@ func _process(delta: float) -> void:
 ## Непрерывные столкновения: шарик летит сразу до ближайшего препятствия,
 ## а внутри пустого куска — до его края за один шаг.
 func _move_ball(b, delta: float) -> void:
+	if b.drill_id >= 0:
+		return   # Клещ бурит — стоит на месте (см. _sim)
 	var p: Vector2 = b.pos
 	var speed: float = b.vel.length()
 	if speed <= 0.0:
 		return
 	var d: Vector2 = b.vel / speed
-	var dist := speed * delta
+	# Гравитация: доворот к цели с ускорением «Тяги»
+	if b.gtarget.x >= 0.0:
+		var to: Vector2 = b.gtarget - p
+		if to.length_squared() > 1.0:
+			d = (d * speed + to.normalized() * _ev("pierce", "gravity_force") * delta).normalized()
+	# Спринтер и Попутный ветер ускоряют полёт (без изменения базовой скорости шара)
+	var mult: float = 1.0 + b.sprint + (b.spd_buff if b.buff_t > 0.0 else 0.0)
+	var dist := minf(speed * mult, MAX_SPEED) * delta
 	var r: float = b.radius
 	var wx0 := r
 	var wy0 := r
@@ -1176,6 +1353,10 @@ func _move_ball(b, delta: float) -> void:
 			b.pos = p
 			b.vel = d * speed
 			_hit_cell(b, hit)
+			if b.drill_id >= 0:
+				b.drill_vel = d * speed   # направление до отскока: после пробоя Клещ может идти «Глубже»
+				b.vel = d * speed
+				return
 		if bnx != 0.0:
 			d.x = -d.x
 		if bny != 0.0:
@@ -1193,8 +1374,11 @@ func _move_ball(b, delta: float) -> void:
 ## × бафф Знаменосца), удар по открытым соседям (Никитиевый 25% + бонус стаи всем) и яд от бонуса стаи.
 func _hit_cell(b, id: int) -> void:
 	Sfx.play("hit", 0.15)
+	b.sprint = 0.0   # Спринтер: удар по породе сбрасывает разгон
 	if b.type == "poison":
 		_apply_poison(id, _poison_ticks(), b)
+		if _has_evo("poison", "infection"):
+			_infect(id, int(poison_hops.get(id, 0)), b)   # при каждом ударе, даже если клетка выдержала
 		return
 	var ti: int = b.ti
 	var mult: float = (2.0 if frenzy_t > 0.0 else 1.0) * ((1.0 + b.buff) if b.buff_t > 0.0 else 1.0)
@@ -1202,7 +1386,18 @@ func _hit_cell(b, id: int) -> void:
 	_damage(id, dmg, b)
 	var share: float = st_share[ti]
 	if share > 0.0:
-		_smash(id, dmg * share, int(GameData.TYPES[b.type].get("smash_radius", 1)), b)
+		var rad := int(GameData.TYPES[b.type].get("smash_radius", 1))
+		if b.type == "splash" and _has_evo("splash", "area"):
+			rad = int(_ev("splash", "area_radius"))
+		_smash(id, dmg * share, rad, b)
+	if b.type == "basic":
+		if _has_evo("basic", "scout"):
+			_scout(id)
+		if _has_evo("basic", "stitch"):
+			_stitch(id, dmg, b)
+	if b.type == "pierce" and _has_evo("pierce", "kleshch") and _hp_of(id) > 0:
+		b.drill_id = id   # Клещ: не разбил с удара — впивается и бурит (см. _move_ball и _sim)
+		b.drill_acc = 0.0
 	var ps := 0.05 * int(fleet.get("poison", 0))
 	if ps > 0.0 and _hp_of(id) > 0:
 		var ticks := _prob_round(dmg * ps)
@@ -1214,6 +1409,138 @@ func _hit_cell(b, id: int) -> void:
 func _prob_round(x: float) -> int:
 	var i := int(floor(x))
 	return i + (1 if randf() < x - i else 0)
+
+
+## Разведка: удар открывает туман вокруг клетки (радиус растёт с веткой).
+func _scout(id: int) -> void:
+	var r := int(_ev("basic", "scout_radius"))
+	var cx := id % W
+	@warning_ignore("integer_division")
+	var cy := id / W
+	for yy in range(maxi(0, cy - r), mini(H - 1, cy + r) + 1):
+		for xx in range(maxi(0, cx - r), mini(W - 1, cx + r) + 1):
+			if (xx - cx) * (xx - cx) + (yy - cy) * (yy - cy) <= r * r and not _vis_at(xx, yy):
+				_reveal(xx, yy)
+
+
+## Прошивка: клетки за целью по линии полёта получают долю силы; линию обрывают стена и край карты.
+func _stitch(id: int, dmg: int, b) -> void:
+	var d: Vector2 = b.vel.normalized()
+	if d == Vector2.ZERO:
+		return
+	@warning_ignore("integer_division")
+	var c := (Vector2(id % W, id / W) + Vector2(0.5, 0.5)) * CELL
+	var depth := int(_ev("basic", "stitch_depth"))
+	var amount := dmg * _ev("basic", "stitch_share")
+	var last := id
+	var k := 1
+	var steps := 0
+	while k <= depth and steps < depth * 3:
+		steps += 1
+		var p := c + d * CELL * 0.75 * steps
+		var x := int(p.x * INV)
+		var y := int(p.y * INV)
+		if x < 0 or y < 0 or x >= W or y >= H:
+			return
+		var nid := y * W + x
+		if nid == last:
+			continue
+		last = nid
+		var kind := _kind_at(x, y)
+		if kind == 2:
+			return
+		if kind == 1:
+			var a := _prob_round(amount)
+			if a > 0:
+				if not _vis_at(x, y):
+					_reveal(x, y)
+				_damage(nid, a, b)
+		k += 1
+
+
+## Инфекция: яд переходит на соседей. Шанс падает за каждый переход («Затухание» уменьшает потерю);
+## каждые полные 100% — один сосед наверняка, остаток — шанс ещё на одного. Только чистые клетки.
+func _infect(id: int, hops: int, b) -> void:
+	var loss := 0.10 * pow(0.8, _el("poison", "infection_fade"))
+	var chance := _ev("poison", "infection_chance") - loss * hops
+	if chance <= 0.0:
+		return
+	var n := _prob_round(chance)
+	if n <= 0:
+		return
+	var cx := id % W
+	@warning_ignore("integer_division")
+	var cy := id / W
+	var cand := []
+	for o in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var x: int = cx + o.x
+		var y: int = cy + o.y
+		if x >= 0 and y >= 0 and x < W and y < H and _kind_at(x, y) == 1 and not poisons.has(y * W + x):
+			cand.append(y * W + x)
+	cand.shuffle()
+	for k in mini(n, cand.size()):
+		poison_hops[cand[k]] = hops + 1
+		_apply_poison(cand[k], _poison_ticks(), b)
+
+
+## Молния: разряд бьёт всю открытую породу в радиусе (стены заслоняют) на четверть базовой силы удара.
+func _lightning(b) -> void:
+	var r := int(_ev("splash", "lightning_range"))
+	var base := float(GameData.TYPES["splash"]["damage"]) + _track_value("splash", "impact")
+	var amount := 0.25 * base
+	var cx := int(b.pos.x * INV)
+	var cy := int(b.pos.y * INV)
+	var hit := false
+	for yy in range(maxi(0, cy - r), mini(H - 1, cy + r) + 1):
+		for xx in range(maxi(0, cx - r), mini(W - 1, cx + r) + 1):
+			if (xx - cx) * (xx - cx) + (yy - cy) * (yy - cy) > r * r:
+				continue
+			if _kind_at(xx, yy) != 1 or not _vis_at(xx, yy):
+				continue
+			if not _clear_line(b.pos, (Vector2(xx, yy) + Vector2(0.5, 0.5)) * CELL):
+				continue
+			var a := _prob_round(amount)
+			if a > 0:
+				_damage(yy * W + xx, a, b)
+				hit = true
+	if hit and zaps.size() < 40:
+		zaps.append({"pos": b.pos, "r": (r + 0.5) * CELL, "t": 0.18})
+		overlay_dirty = true
+
+
+## Нет ли стены между двумя точками (проверка по клеткам с шагом в полклетки).
+func _clear_line(a: Vector2, c: Vector2) -> bool:
+	var n := int(a.distance_to(c) / (CELL * 0.5)) + 1
+	for k in range(1, n):
+		var p := a.lerp(c, float(k) / n)
+		if _kind_at(int(p.x * INV), int(p.y * INV)) == 2:
+			return false
+	return true
+
+
+## Гравитация: цель — самая крепкая видимая клетка породы в радиусе (при равенстве — ближняя), не за стеной.
+func _gravity_target(b) -> Vector2:
+	var r := int(_ev("pierce", "gravity_range"))
+	var cx := int(b.pos.x * INV)
+	var cy := int(b.pos.y * INV)
+	var best := -1
+	var best_hp := 0
+	var best_d := 1 << 30
+	for yy in range(maxi(0, cy - r), mini(H - 1, cy + r) + 1):
+		for xx in range(maxi(0, cx - r), mini(W - 1, cx + r) + 1):
+			var d2 := (xx - cx) * (xx - cx) + (yy - cy) * (yy - cy)
+			if d2 > r * r or _kind_at(xx, yy) != 1 or not _vis_at(xx, yy):
+				continue
+			var h := _hp_of(yy * W + xx)
+			if h > best_hp or (h == best_hp and d2 < best_d):
+				best = yy * W + xx
+				best_hp = h
+				best_d = d2
+	if best < 0:
+		return Vector2(-1, -1)
+	@warning_ignore("integer_division")
+	var tc := (Vector2(best % W, best / W) + Vector2(0.5, 0.5)) * CELL
+	return tc if _clear_line(b.pos, tc) else Vector2(-1, -1)
 
 
 ## Удар по открытым разрушаемым клеткам вокруг (радиус по Чебышёву), каждой — доля силы.
@@ -1257,6 +1584,8 @@ func _damage(id: int, amount: int, b) -> void:
 	if c.kind[li] != 1:
 		return
 	var h: int = c.hp[li]
+	if _has_evo("poison", "corrosion") and (poisons.has(id) or float(corr_until.get(id, -1.0)) > time_acc):
+		amount = _prob_round(amount * (1.0 + _ev("poison", "corrosion_bonus")))   # Разъедание
 	var dealt := mini(amount, h)
 	c.hp[li] = h - dealt
 	c.changed = true
@@ -1284,6 +1613,8 @@ func _on_destroyed(x: int, y: int, id: int) -> void:
 	var ppm := u_ppm * (2 if _mask_at(x, y) == 4 else 1)   # в полостях картинок — вдвое чаще
 	if _hash3(x, y, seed_i + 7) % 1000000 < ppm:
 		run_u += 1
+		if _has_evo("basic", "scout"):
+			run_u += _prob_round(_ev("basic", "scout_find"))   # Находка: каждые 100% — ещё U наверняка
 		Sfx.play("u", 0.03)
 		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "+1 U", "t": 1.5})
 		overlay_dirty = true
@@ -1296,7 +1627,11 @@ func _on_destroyed(x: int, y: int, id: int) -> void:
 		popups.append({"pos": (Vector2(x, y) + Vector2(0.5, 0.5)) * CELL, "text": "×2!", "t": 1.5})
 		Sfx.play("gold", 0.0)
 	if poisons.has(id):
+		if _has_evo("poison", "infection"):
+			_infect(id, int(poison_hops.get(id, 0)), poisons[id]["ball"])   # кем бы ни была добита
 		poisons.erase(id)
+	poison_hops.erase(id)
+	corr_until.erase(id)
 
 
 ## Яд (как в pixel-rikoshet): клетка считает оставшиеся тики; каждый удар прибавляет тики,
@@ -1322,6 +1657,8 @@ func _tick_poison(dt: float) -> void:
 			_damage(id, int(p["dmg"]) * (2 if frenzy_t > 0.0 else 1), p["ball"])
 		if poisons.has(id) and (p["left"] <= 0 or _hp_of(id) <= 0):
 			poisons.erase(id)
+			if _has_evo("poison", "corrosion") and _el("poison", "corrosion_linger") > 0:
+				corr_until[id] = time_acc + _ev("poison", "corrosion_linger")
 			_mark_cell(id)
 
 
@@ -1498,7 +1835,7 @@ func _redraw_dirty() -> void:
 func _draw_balls() -> void:
 	# на экране шарик не меньше 11 пикселей, иначе его не видно при отдалении
 	var min_d := 11.0 / zoom
-	var ar := _aura_radius()
+	var ar := aura_r_now if aura_r_now > 0.0 else _aura_radius()   # с боевым кличем круг шире
 	var acol: Color = colors["banner"]
 	acol.a = 0.35
 	for b in balls:
@@ -1781,6 +2118,9 @@ func _draw_border() -> void:
 
 
 func _draw_overlay() -> void:
+	# вспышки молний: тонкий круг радиуса разряда, быстро гаснет
+	for z in zaps:
+		overlay.draw_arc(z["pos"], z["r"], 0.0, TAU, 40, Color(0.7, 0.85, 1.0, 0.7 * z["t"] / 0.18), 2.0 / zoom)
 	var w := 3.0 / zoom
 	var dir := Vector2.from_angle(deg_to_rad(aim_angle))
 	var col: Color = colors[selected]
@@ -2120,7 +2460,12 @@ func _fire(from = null) -> void:
 	counts[t] += 1
 	_recalc_stats()   # бонусы стаи считаются по числу купленных
 	last_launch = lp
-	_spawn_ball(t, aim_angle, lp)
+	var n := _volley_size() if t == "sniper" else 1
+	for k in n:
+		# залп Дробовика — симметричный веер, считается одним пуском
+		var off: float = 0.0 if k == 0 else ceil(k / 2.0) * 9.0 * (1 if k % 2 == 1 else -1)
+		_spawn_ball(t, aim_angle + off, lp)
+	extra[t] += n - 1
 	Sfx.play("launch")
 	_refresh_ui()
 
@@ -2476,7 +2821,7 @@ func _build_ui() -> void:
 		ts.target = sc
 		upg.add_child(ts)
 	tabs.set_tab_title(0, tr("  Шарики  "))
-	tabs.set_tab_hidden(1, true)   # вторая вкладка — «Эволюции» (следующий этап переноса из pixel-rikoshet)
+	tabs.set_tab_title(1, tr("  Эволюции  "))
 	var bclose := _button(tr("Вернуться к игре"), "AccentButton", 60)
 	bclose.pressed.connect(_show_upgrades.bind(false))
 	uv.add_child(bclose)
@@ -2567,6 +2912,7 @@ func _rebuild_rows() -> void:
 			c.queue_free()
 	shop_refs.clear()
 	perk_refs.clear()
+	evo_refs.clear()
 	chips.clear()
 	chip_group = ButtonGroup.new()
 	if not unl[selected]:
@@ -2652,7 +2998,59 @@ func _rebuild_rows() -> void:
 			ub.pressed.connect(_unlock_type.bind(t))
 			cv.add_child(ub)
 			shop_refs[t] = {"extra": extra, "fleet": fl, "unlock": ub}
+	_build_evo_cards()
 	_refresh_ui()
+
+
+## Вкладка «Эволюции»: у каждого открытого шара две эволюции за U; купленная открывает две бесконечные ветки.
+func _build_evo_cards() -> void:
+	for t in GameData.TYPE_ORDER:
+		var def: Dictionary = GameData.TYPES[t]
+		var card := PanelContainer.new()
+		card.theme_type_variation = "Card"
+		perk_box.add_child(card)
+		var cv := VBoxContainer.new()
+		cv.add_theme_constant_override("separation", 10)
+		card.add_child(cv)
+		_card_head(cv, t, not unl[t])
+		if not unl[t]:
+			card.modulate = Color(1, 1, 1, 0.6)
+			cv.add_child(_label(tr("Сначала откройте шар"), "Muted"))
+			continue
+		var refs := {}
+		for e in GameData.EVOS[t]:
+			var eid: String = e["id"]
+			var ev_box := VBoxContainer.new()
+			ev_box.add_theme_constant_override("separation", 6)
+			cv.add_child(ev_box)
+			var nm := _label(tr(e["name"]), "")
+			nm.add_theme_font_override("font", GameData.font_bold)
+			ev_box.add_child(nm)
+			var ds := _label(tr(e["desc"]), "Muted")
+			ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			ev_box.add_child(ds)
+			if not _has_evo(t, eid):
+				var bb := _button("", "AccentButton", 58, ic_gem)
+				bb.pressed.connect(_buy_evo.bind(t, eid))
+				ev_box.add_child(bb)
+				refs[eid] = {"buy": bb}
+				continue
+			var ladders := {}
+			for tr_ in e["tracks"]:
+				var row := HBoxContainer.new()
+				row.add_theme_constant_override("separation", 10)
+				ev_box.add_child(row)
+				var cap := _label("", "")
+				cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				row.add_child(cap)
+				var lb := _button("", "", 58, ic_gem)
+				lb.custom_minimum_size.x = 130
+				lb.pressed.connect(_buy_ladder.bind(t, tr_["id"]))
+				row.add_child(lb)
+				ladders[tr_["id"]] = {"label": cap, "button": lb, "name": tr_["name"]}
+			refs[eid] = {"ladders": ladders}
+		evo_refs[t] = refs
 
 
 func _refresh_ui() -> void:
@@ -2698,7 +3096,7 @@ func _refresh_ui() -> void:
 	upg_u.text = str(run_u)
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
-		r["extra"].text = tr("шаров на карте: %d") % counts[t]
+		r["extra"].text = tr("шаров на карте: %d") % (int(counts[t]) + int(extra[t]))
 		r["fleet"].text = _fleet_text(t)
 		if r.has("unlock"):
 			r["unlock"].disabled = run_u < 1
@@ -2708,6 +3106,23 @@ func _refresh_ui() -> void:
 			r["tracks"][id]["label"].text = _track_caption(t, id)
 			r["tracks"][id]["button"].text = GameData.fmt(cost)
 			r["tracks"][id]["button"].disabled = coins < cost
+	for t in evo_refs:
+		for eid in evo_refs[t]:
+			var er: Dictionary = evo_refs[t][eid]
+			if er.has("buy"):
+				var ec := _evo_cost(t)
+				er["buy"].text = tr("Эволюция · %d") % ec
+				er["buy"].disabled = run_u < ec
+				continue
+			for trk in er["ladders"]:
+				var lr: Dictionary = er["ladders"][trk]
+				lr["label"].text = "%s · %s" % [tr(lr["name"]), tr("ур. %d") % _el(t, trk)]
+				if _ladder_maxed(t, trk):
+					lr["button"].text = tr("макс.")
+					lr["button"].disabled = true
+				else:
+					lr["button"].text = str(_ladder_cost(t, trk))
+					lr["button"].disabled = run_u < _ladder_cost(t, trk)
 
 
 ## Подпись ветки: «Скорость 8.2 → 9.9 кл/с», «Сила удара 1 → 2», …

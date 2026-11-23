@@ -157,6 +157,36 @@ func _spend_u(g) -> int:
 		if not g.unl[t] and g.run_u >= 1:
 			g._unlock_type(t)
 			spent += 1
+	# эволюции — у типов, где уже есть шары; затем самая дешёвая ветка (как разумный игрок)
+	for k in 30:
+		var best_t := ""
+		var best_e := ""
+		var best_tr := ""
+		var bc := 1 << 30
+		for t in GameData.TYPE_ORDER:
+			if not g.unl[t] or int(g.counts[t]) == 0:
+				continue
+			for e in GameData.EVOS[t]:
+				if not g._has_evo(t, e["id"]):
+					if g._evo_cost(t) < bc:
+						bc = g._evo_cost(t)
+						best_t = t
+						best_e = e["id"]
+						best_tr = ""
+				else:
+					for trk in e["tracks"]:
+						if not g._ladder_maxed(t, trk["id"]) and g._ladder_cost(t, trk["id"]) < bc:
+							bc = g._ladder_cost(t, trk["id"])
+							best_t = t
+							best_e = ""
+							best_tr = trk["id"]
+		if best_t == "" or g.run_u < bc:
+			break
+		spent += bc
+		if best_e != "":
+			g._buy_evo(best_t, best_e)
+		else:
+			g._buy_ladder(best_t, best_tr)
 	return spent
 
 

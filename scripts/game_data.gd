@@ -67,6 +67,79 @@ const FLEET_DESC := {
 }
 
 
+## Эволюции (как в pixel-rikoshet): у каждого шара две. Покупка за U уровня: первая 5 U, вторая 10 U.
+## Каждая открывает две бесконечные ветки за U: уровень N стоит N U (до 40). Значение = base + step·уровень.
+## Всё внутри уровня: на новом уровне эволюции и ветки начинаются заново.
+const EVO_COST := 5
+const EVO_LATER_MULT := 2
+const LADDER_MAX := 40
+const EVOS := {
+	"basic": [
+		{"id": "scout", "name": "Разведка", "desc": "Удар открывает туман вокруг; разбитые клетки с U с шансом дают ещё U.",
+			"tracks": [{"id": "scout_radius", "name": "Радиус разведки", "base": 2.0, "step": 0.5},
+				{"id": "scout_find", "name": "Находка", "base": 0.0, "step": 0.1}]},
+		{"id": "stitch", "name": "Прошивка", "desc": "Удар идёт дальше по линии полёта: клетки за целью получают половину силы.",
+			"tracks": [{"id": "stitch_depth", "name": "Глубина прошивки", "base": 1.0, "step": 1.0},
+				{"id": "stitch_share", "name": "Сила прошивки", "base": 0.5, "step": 0.1}]},
+	],
+	"sniper": [
+		{"id": "sprint", "name": "Спринтер", "desc": "Каждая секунда без удара по породе даёт +1% скорости. Удар по породе сбрасывает разгон.",
+			"tracks": [{"id": "sprint_cap", "name": "Предел разгона", "base": 0.25, "step": 0.25},
+				{"id": "sprint_rate", "name": "Темп разгона", "base": 0.01, "step": 0.005}]},
+		{"id": "shotgun", "name": "Дробовик", "desc": "Один пуск выпускает веер из нескольких шаров по цене одного.",
+			"tracks": [{"id": "shotgun_balls", "name": "Шаров в залпе", "base": 2.0, "step": 0.5},
+				{"id": "shotgun_cheap", "name": "Массовое производство", "base": 0.0, "step": 0.05}]},
+	],
+	"splash": [
+		{"id": "lightning", "name": "Молния", "desc": "Разряды бьют всю открытую породу вокруг на четверть силы удара.",
+			"tracks": [{"id": "lightning_rate", "name": "Частота молний", "base": 0.25, "step": 0.25},
+				{"id": "lightning_range", "name": "Дальность молний", "base": 3.0, "step": 1.0}]},
+		{"id": "area", "name": "Площадь", "desc": "Удар по соседям достаёт дальше: радиус сразу 2.",
+			"tracks": [{"id": "area_radius", "name": "Радиус удара", "base": 2.0, "step": 1.0},
+				{"id": "area_share", "name": "Сила по площади", "base": 0.0, "step": 0.05}]},
+	],
+	"poison": [
+		{"id": "infection", "name": "Инфекция", "desc": "Яд переходит на соседние клетки.",
+			"tracks": [{"id": "infection_chance", "name": "Шанс заражения", "base": 0.28, "step": 0.28},
+				{"id": "infection_fade", "name": "Затухание заражения", "base": 0.0, "step": 1.0}]},
+		{"id": "corrosion", "name": "Разъедание", "desc": "Отравленная клетка получает на 50% больше урона от всех.",
+			"tracks": [{"id": "corrosion_bonus", "name": "Уязвимость", "base": 0.5, "step": 0.1},
+				{"id": "corrosion_linger", "name": "Остаточная коррозия", "base": 0.0, "step": 2.0}]},
+	],
+	"banner": [
+		{"id": "war_banner", "name": "Боевое знамя", "desc": "Круг даёт ещё +10% урона. Раз в 10 с боевой клич: на секунду круг вдвое шире.",
+			"tracks": [{"id": "war_banner_damage", "name": "Бафф урона", "base": 0.1, "step": 0.1},
+				{"id": "war_banner_cry", "name": "Боевой клич", "base": 10.0, "step": -1.0, "min": 3.0}]},
+		{"id": "tailwind", "name": "Попутный ветер", "desc": "Круг ещё и ускоряет шары внутри.",
+			"tracks": [{"id": "tailwind_speed", "name": "Бафф скорости", "base": 0.1, "step": 0.1},
+				{"id": "tailwind_self", "name": "Свой ветер", "base": 0.0, "step": 0.3}]},
+	],
+	"pierce": [
+		{"id": "gravity", "name": "Гравитация", "desc": "Тянется к самой крепкой видимой клетке породы в радиусе.",
+			"tracks": [{"id": "gravity_force", "name": "Тяга", "base": 600.0, "step": 250.0},
+				{"id": "gravity_range", "name": "Дальность притяжения", "base": 6.0, "step": 2.0}]},
+		{"id": "kleshch", "name": "Клещ", "desc": "Не разбил клетку с удара — впивается и бурит её, пока не сломает: за секунду снимает столько, сколько один удар.",
+			"tracks": [{"id": "kleshch_deeper", "name": "Глубже", "base": 0.0, "step": 1.0},
+				{"id": "kleshch_grip", "name": "Хватка", "base": 1.0, "step": 0.25}]},
+	],
+}
+
+
+static func evo_def(t: String, id: String) -> Dictionary:
+	for e in EVOS[t]:
+		if e["id"] == id:
+			return e
+	return {}
+
+
+static func evo_track(t: String, track: String) -> Dictionary:
+	for e in EVOS[t]:
+		for tr_ in e["tracks"]:
+			if tr_["id"] == track:
+				return tr_
+	return {}
+
+
 static func fleet_steps(count: int) -> int:
 	var k := 0
 	for s in FLEET_STEPS:

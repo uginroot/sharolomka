@@ -365,7 +365,11 @@ func test_meadow_completes() -> void:
 	fire_n(g, "pierce", 10)
 	for k in 6:
 		g._buy_track("splash", "impact")
-	sim(g, 120.0, func(gg): return gg.alive > 0)
+	# как в игре: проверка цели запускает финал, который ведёт шары к последним квадратам
+	# (без неё последний квадрат добивался случайно — тест «плавал», найдено при переносе v0.27)
+	sim(g, 120.0, func(gg):
+		gg._check_goal()
+		return gg.alive > 0)
 	check(g.alive == 0, "за 120 с осталось квадратов: %d" % g.alive)
 	check(g.goal_done or g.destroyed >= g.goal, "цель не засчитана")
 	g._check_goal()
@@ -465,6 +469,12 @@ func test_translations_complete() -> void:
 		keys[mp["name"]] = "maps.gd"
 	for th in preload("res://scripts/maps.gd").THEMES:
 		keys[th["name"]] = "maps.gd (темы)"
+	for tp in GameData.EVOS:
+		for e in GameData.EVOS[tp]:
+			keys[e["name"]] = "game_data.gd (эволюции)"
+			keys[e["desc"]] = "game_data.gd (эволюции)"
+			for tr_ in e["tracks"]:
+				keys[tr_["name"]] = "game_data.gd (ветки эволюций)"
 	for br in GameData.META_BRANCHES:
 		keys[br] = "game_data.gd (ветки)"
 	for m in GameData.META:
@@ -873,7 +883,7 @@ func test_chaos() -> void:
 		for b in g.balls:
 			counted[b.type] = int(counted.get(b.type, 0)) + 1
 		for t in GameData.TYPE_ORDER:
-			check(int(counted.get(t, 0)) == int(g.counts[t]), "карта %d: шаров %s %d, а куплено %d" % [map_i, t, int(counted.get(t, 0)), g.counts[t]])
+			check(int(counted.get(t, 0)) == int(g.counts[t]) + int(g.extra[t]), "карта %d: шаров %s %d, а куплено %d (+%d из залпов)" % [map_i, t, int(counted.get(t, 0)), g.counts[t], g.extra[t]])
 
 
 ## Перерисовка поля не чаще 10 раз в секунду (батарея).
@@ -1430,3 +1440,220 @@ func test_fog_edge_neighbors() -> void:
 	g._reveal(x - 1, y)   # открывает и клетку x=31 у края куска
 	check(g.dirty.has(right), "соседний кусок не помечен к перерисовке — край тумана там не обновится")
 	check(g.chunks[right].fog_dirty, "у соседнего куска не сброшен кэш края тумана")
+
+
+
+func _brick_near(g, from: Vector2i, min_hp: int = 1) -> int:
+	for r in range(1, 40):
+		for y in range(from.y - r, from.y + r + 1):
+			for x in range(from.x - r, from.x + r + 1):
+				if x >= 0 and y >= 0 and x < g.W and y < g.H and g._kind_at(x, y) == 1 and g._vis_at(x, y) and g._hp_of(y * g.W + x) >= min_hp:
+					return y * g.W + x
+	return -1
+
+
+## Эволюции: цены (5, затем 10 U; ветка N стоит N U), только для открытых шаров, сохраняются с уровнем.
+func test_evolution_purchase() -> void:
+	var g = await new_game(2)
+	g.run_u = 100
+	g._buy_evo("splash", "lightning")
+	check(not g._has_evo("splash", "lightning") and g.run_u == 100, "эволюция купилась у закрытого шара")
+	g._unlock_type("splash")
+	g._buy_evo("splash", "lightning")
+	check(g._has_evo("splash", "lightning") and g.run_u == 94, "первая эволюция стоила не 5 U: осталось %d" % g.run_u)
+	g._buy_evo("splash", "area")
+	check(g._has_evo("splash", "area") and g.run_u == 84, "вторая эволюция стоила не 10 U: осталось %d" % g.run_u)
+	for k in 3:
+		g._buy_ladder("splash", "lightning_rate")
+	check(g._el("splash", "lightning_rate") == 3 and g.run_u == 78, "ветка стоила не 1+2+3 U: осталось %d" % g.run_u)
+	g._buy_ladder("splash", "sprint_cap")
+	check(g.run_u == 78, "купилась ветка чужой эволюции")
+	g._unlock_type("banner")
+	g._buy_evo("banner", "war_banner")
+	for k in 12:
+		g.run_u = 100
+		g._buy_ladder("banner", "war_banner_cry")
+	check(is_equal_approx(g._ev("banner", "war_banner_cry"), 3.0) and g._ladder_maxed("banner", "war_banner_cry"), "«Боевой клич» ушёл ниже 3 с")
+	g._save_state()
+	var keep_u: int = g.run_u
+	game.queue_free()
+	game = null
+	await get_tree().process_frame
+	game = GAME.instantiate()
+	add_child(game)
+	check(game._has_evo("splash", "lightning") and game._el("splash", "lightning_rate") == 3 and game.run_u == keep_u,
+		"эволюции и ветки не сохранились с уровнем")
+	var g2 = await new_game(3)
+	check(g2.evo["splash"].is_empty(), "на новом уровне эволюции не сброшены")
+
+
+## Механики эволюций Пронизывающего, Гесиевого и Никитиевого.
+func test_evolution_mechanics_a() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	g.run_u = 1000
+	# Разведка: удар открывает туман вокруг
+	g._buy_evo("basic", "scout")
+	g.balls.clear()
+	g.coins = 100000
+	g.selected = "basic"
+	g._fire(g.start_pos)
+	var b = g.balls[0]
+	var id := _brick_near(g, g.start_cell)
+	var hidden_before := 0
+	var cx: int = id % g.W
+	var cy: int = id / g.W
+	for yy in range(cy - 2, cy + 3):
+		for xx in range(cx - 2, cx + 3):
+			if not g._vis_at(xx, yy):
+				hidden_before += 1
+	g._hit_cell(b, id)
+	var hidden_after := 0
+	for yy in range(cy - 2, cy + 3):
+		for xx in range(cx - 2, cx + 3):
+			if not g._vis_at(xx, yy) and (xx - cx) * (xx - cx) + (yy - cy) * (yy - cy) <= 4:
+				hidden_after += 1
+	check(hidden_after == 0, "Разведка не открыла туман вокруг удара (было скрыто %d)" % hidden_before)
+	# Прошивка: клетка за целью по линии полёта получает долю силы
+	g._buy_evo("basic", "stitch")
+	var tgt := _brick_near(g, g.start_cell, 1)
+	var tx: int = tgt % g.W
+	var ty: int = tgt / g.W
+	var behind := -1
+	for o in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		if g._kind_at(tx + o.x, ty + o.y) == 1 and g._hp_of((ty + o.y) * g.W + tx + o.x) >= 4:
+			behind = (ty + o.y) * g.W + tx + o.x
+			b.vel = Vector2(o) * 300.0
+			break
+	if behind >= 0:
+		var h0: int = g._hp_of(behind)
+		g._stitch(tgt, 4, b)
+		check(g._hp_of(behind) < h0, "Прошивка не задела клетку за целью")
+	# Спринтер: разгон без ударов до предела, удар сбрасывает
+	g._buy_evo("sniper", "sprint")
+	g.balls.clear()
+	g._spawn_ball("sniper", -90.0, g.start_pos)
+	var s = g.balls[0]
+	s.sprint = 0.0
+	for k in 200:
+		s.sprint = minf(g._ev("sniper", "sprint_cap"), s.sprint + g._ev("sniper", "sprint_rate") * 0.1)
+	check(s.sprint > 0.15, "Спринтер не разгоняется")
+	g._hit_cell(s, _brick_near(g, g.start_cell))
+	check(s.sprint == 0.0, "удар по породе не сбросил разгон")
+	# Дробовик: один пуск — веер, цена растёт как за один, скидка на пуск
+	g.balls.clear()
+	g.counts["sniper"] = 0
+	g.extra["sniper"] = 0
+	var p0: int = g._ball_cost("sniper")
+	g._buy_evo("sniper", "shotgun")
+	check(g._ball_cost("sniper") == p0, "Дробовик без ветки изменил цену")
+	g.selected = "sniper"
+	g.coins = 100000
+	g._fire(g.start_pos)
+	check(g.balls.size() == 3 and g.counts["sniper"] == 1 and g.extra["sniper"] == 2, "залп Дробовика: шаров %d, пусков %d" % [g.balls.size(), g.counts["sniper"]])
+	for k in 4:
+		g._buy_ladder("sniper", "shotgun_cheap")
+	var nodisc := int(round((50.0 + 5.0) * 1.12))
+	check(g._ball_cost("sniper") < nodisc, "«Массовое производство» не снизило цену: %d" % g._ball_cost("sniper"))
+	# Площадь: удар по соседям на радиус 2
+	g._buy_evo("splash", "area")
+	g.balls.clear()
+	g._spawn_ball("splash", 0.0, g.start_pos)
+	var rb = g.balls[0]
+	var far := -1
+	var center := -1
+	for y in range(g.ey0, g.ey1 + 1):
+		for x in range(g.ex0, g.ex1 + 1):
+			if center < 0 and g._kind_at(x, y) == 1 and g._vis_at(x + 2, y) and g._kind_at(x + 2, y) == 1 and g._hp_of(y * g.W + x + 2) > 1:
+				center = y * g.W + x
+				far = y * g.W + x + 2
+	if center >= 0:
+		var hf: int = g._hp_of(far)
+		for k in 20:
+			g._hit_cell(rb, center)
+			if g._hp_of(center) <= 0:
+				break
+		check(g._hp_of(far) < hf, "Площадь не достала клетку на расстоянии 2")
+	# Молния: разряд бьёт открытую породу вокруг шара
+	g._buy_evo("splash", "lightning")
+	for k in 8:
+		g._buy_ladder("splash", "lightning_range")
+	var lid := _brick_near(g, g.start_cell, 3)
+	var lx: int = lid % g.W
+	var ly: int = lid / g.W
+	rb.pos = (Vector2(lx, ly) + Vector2(0.5, 0.5)) * 40.0 + Vector2(0, 40)
+	var hl: int = g._hp_of(lid)
+	for k in 12:
+		g._lightning(rb)
+	check(g._hp_of(lid) < hl, "Молния не задела открытую породу рядом")
+
+
+## Механики эволюций Антониевого, Отбойника и Знаменосца.
+func test_evolution_mechanics_b() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	g.run_u = 1000
+	g.balls.clear()
+	# Инфекция: при 100%+ шансе яд наверняка переходит на соседа
+	g._buy_evo("poison", "infection")
+	for k in 4:
+		g._buy_ladder("poison", "infection_chance")
+	g._spawn_ball("poison", 0.0, g.start_pos)
+	var pb = g.balls[0]
+	var pid := -1
+	for y in range(g.ey0, g.ey1 + 1):
+		for x in range(g.ex0, g.ex1 + 1):
+			if pid < 0 and g._kind_at(x, y) == 1 and (g._kind_at(x + 1, y) == 1 or g._kind_at(x - 1, y) == 1 or g._kind_at(x, y + 1) == 1 or g._kind_at(x, y - 1) == 1):
+				pid = y * g.W + x
+	var n0: int = g.poisons.size()
+	g._hit_cell(pb, pid)
+	check(g.poisons.size() >= n0 + 2, "Инфекция не перешла на соседа (отравлено %d)" % (g.poisons.size() - n0))
+	# Разъедание: отравленная клетка получает больше урона
+	g._buy_evo("poison", "corrosion")
+	var cid := _brick_near(g, g.start_cell, 30)
+	if cid >= 0:
+		g._apply_poison(cid, 100, pb)
+		var h0: int = g._hp_of(cid)
+		var hits := 0
+		for k in 20:
+			g._damage(cid, 1, null)
+		check(h0 - g._hp_of(cid) > 20, "Разъедание не усилило урон по отравленной клетке: %d за 20 ударов по 1" % (h0 - g._hp_of(cid)))
+	# Гравитация: цель — самая крепкая видимая клетка в радиусе
+	g._buy_evo("pierce", "gravity")
+	g._spawn_ball("pierce", 0.0, g.start_pos)
+	var gb = g.balls[-1]
+	var tgt: Vector2 = g._gravity_target(gb)
+	if tgt.x >= 0.0:
+		var tcell: int = int(tgt.y / 40.0) * g.W + int(tgt.x / 40.0)
+		var mx := 0
+		var r := int(g._ev("pierce", "gravity_range"))
+		var cx := int(gb.pos.x / 40.0)
+		var cy := int(gb.pos.y / 40.0)
+		for yy in range(cy - r, cy + r + 1):
+			for xx in range(cx - r, cx + r + 1):
+				if (xx - cx) * (xx - cx) + (yy - cy) * (yy - cy) <= r * r and g._vis_at(xx, yy) and g._kind_at(xx, yy) == 1:
+					mx = maxi(mx, g._hp_of(yy * g.W + xx))
+		check(g._hp_of(tcell) == mx, "Гравитация выбрала не самую крепкую клетку (%d < %d)" % [g._hp_of(tcell), mx])
+	# Клещ: не разбил с удара — бурит до конца
+	g._buy_evo("pierce", "kleshch")
+	var kid := _brick_near(g, g.start_cell, 30)
+	g._spawn_ball("pierce", 0.0, g.start_pos)
+	var kb = g.balls[-1]
+	kb.vel = Vector2(300, 0)
+	g._hit_cell(kb, kid)
+	check(kb.drill_id == kid, "Клещ не впился в клетку, которую не разбил")
+	for k in 600:
+		g._sim(0.05)
+		if g._hp_of(kid) <= 0:
+			break
+	check(g._hp_of(kid) <= 0 and kb.drill_id == -1, "Клещ не добурил клетку")
+	# Боевое знамя и Попутный ветер
+	g._buy_evo("banner", "war_banner")
+	g._buy_evo("banner", "tailwind")
+	g.balls.clear()
+	g._spawn_ball("banner", 0.0, g.start_pos)
+	g._spawn_ball("basic", 0.0, g.start_pos + Vector2(10, 0))
+	g.counts["banner"] = 1
+	g.time_acc = 30.5   # момент боевого клича (раз в 10 с)
+	g._update_aura()
+	var bb = g.balls[1]
+	check(bb.buff > 0.39 and bb.spd_buff > 0.09, "аура: урон +%.2f, скорость +%.2f" % [bb.buff, bb.spd_buff])
+	check(g.aura_r_now >= g._aura_radius() * 1.99, "боевой клич не расширил круг")
