@@ -76,7 +76,7 @@ const LADDER_MAX := 40
 const EVOS := {
 	"basic": [
 		{"id": "scout", "name": "Разведка", "desc": "Удар открывает туман вокруг; разбитые клетки с U с шансом дают ещё U.",
-			"tracks": [{"id": "scout_radius", "name": "Радиус разведки", "base": 2.0, "step": 0.5},
+			"tracks": [{"id": "scout_radius", "name": "Радиус разведки", "base": 2.0, "step": 1.0},
 				{"id": "scout_find", "name": "Находка", "base": 0.0, "step": 0.1}]},
 		{"id": "stitch", "name": "Прошивка", "desc": "Удар идёт дальше по линии полёта: клетки за целью получают половину силы.",
 			"tracks": [{"id": "stitch_depth", "name": "Глубина прошивки", "base": 1.0, "step": 1.0},

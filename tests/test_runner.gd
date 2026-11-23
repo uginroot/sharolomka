@@ -1657,3 +1657,35 @@ func test_evolution_mechanics_b() -> void:
 	var bb = g.balls[1]
 	check(bb.buff > 0.39 and bb.spd_buff > 0.09, "аура: урон +%.2f, скорость +%.2f" % [bb.buff, bb.spd_buff])
 	check(g.aura_r_now >= g._aura_radius() * 1.99, "боевой клич не расширил круг")
+
+
+
+## Подписи прокачки — значения с единицами («сейчас → после покупки»), а не номера уровней.
+func test_upgrade_captions_values() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	g.run_u = 1000
+	for t in GameData.TYPE_ORDER:
+		for e in GameData.EVOS[t]:
+			g._buy_evo(t, e["id"])
+	g._show_upgrades(true)
+	g._refresh_ui()
+	var expect := {"scout_radius": "2 кл → 3 кл", "scout_find": "0% → 10%", "lightning_rate": "0.25/с → 0.5/с",
+		"shotgun_balls": "×3 → ×3", "war_banner_cry": "10 с → 9 с", "infection_fade": "−10% → −8%",
+		"sprint_rate": "1%/с → 1.5%/с", "kleshch_grip": "1/с → 1.25/с"}
+	for t in GameData.TYPE_ORDER:
+		for e in GameData.EVOS[t]:
+			for trk in e["tracks"]:
+				var cap: String = g._ev_caption(t, trk["id"])
+				check("→" in cap, "у ветки %s нет «сейчас → после»: %s" % [trk["id"], cap])
+				check(not ("ур." in cap), "в подписи ветки номер уровня вместо значения: %s" % cap)
+				if expect.has(trk["id"]):
+					check(cap.ends_with(expect[trk["id"]]), "%s: «%s», ждали «…%s»" % [trk["id"], cap, expect[trk["id"]]])
+	for t in g.shop_refs:
+		if g.shop_refs[t].has("tracks"):
+			for id in g.shop_refs[t]["tracks"]:
+				var c: String = g._track_caption(t, id)
+				check("→" in c, "у ветки за монеты %s/%s нет значений: %s" % [t, id, c])
+	check(g._track_caption("poison", "cadence").ends_with("1/с → 1.5/с"), "частота яда без единиц: %s" % g._track_caption("poison", "cadence"))
+	check(g._track_caption("banner", "radius").ends_with("3 кл → 4 кл"), "радиус ауры без единиц: %s" % g._track_caption("banner", "radius"))
+	check(g._track_caption("basic", "speed").begins_with("Скорость: ") and g._track_caption("basic", "speed").ends_with("кл/с"), "скорость: %s" % g._track_caption("basic", "speed"))
+	check(g._ev_caption("sniper", "shotgun_cheap").begins_with("Массовое производство: 0% → −5%"), "скидка на нулевом уровне: %s" % g._ev_caption("sniper", "shotgun_cheap"))

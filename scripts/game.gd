@@ -2821,7 +2821,8 @@ func _build_ui() -> void:
 		ts.target = sc
 		upg.add_child(ts)
 	tabs.set_tab_title(0, tr("  Шарики  "))
-	tabs.set_tab_title(1, tr("  Эволюции  "))
+	tabs.set_tab_hidden(1, true)
+	tabs.tabs_visible = false   # прокачка на одной странице: карточка шара содержит и монеты, и эволюции
 	var bclose := _button(tr("Вернуться к игре"), "AccentButton", 60)
 	bclose.pressed.connect(_show_upgrades.bind(false))
 	uv.add_child(bclose)
@@ -2992,65 +2993,124 @@ func _rebuild_rows() -> void:
 				row.add_child(bt)
 				trs[tr_["id"]] = {"label": cap, "button": bt}
 			shop_refs[t] = {"extra": extra, "fleet": fl, "tracks": trs}
+			_build_evo_section(cv, t)
 		else:
 			card.modulate = Color(1, 1, 1, 0.75)
 			var ub := _button(tr("Открыть · 1 U"), "AccentButton", 62, ic_gem)
 			ub.pressed.connect(_unlock_type.bind(t))
 			cv.add_child(ub)
 			shop_refs[t] = {"extra": extra, "fleet": fl, "unlock": ub}
-	_build_evo_cards()
 	_refresh_ui()
 
 
-## Вкладка «Эволюции»: у каждого открытого шара две эволюции за U; купленная открывает две бесконечные ветки.
-func _build_evo_cards() -> void:
-	for t in GameData.TYPE_ORDER:
-		var def: Dictionary = GameData.TYPES[t]
-		var card := PanelContainer.new()
-		card.theme_type_variation = "Card"
-		perk_box.add_child(card)
-		var cv := VBoxContainer.new()
-		cv.add_theme_constant_override("separation", 10)
-		card.add_child(cv)
-		_card_head(cv, t, not unl[t])
-		if not unl[t]:
-			card.modulate = Color(1, 1, 1, 0.6)
-			cv.add_child(_label(tr("Сначала откройте шар"), "Muted"))
+## Эволюции шара — в его же карточке, под прокачкой за монеты: две эволюции за U,
+## у купленной — две бесконечные ветки со значениями «сейчас → после покупки».
+func _build_evo_section(cv: VBoxContainer, t: String) -> void:
+	var sep := HSeparator.new()
+	sep.modulate = Color(1, 1, 1, 0.35)
+	cv.add_child(sep)
+	var hd := _label(tr("  Эволюции  ").strip_edges(), "Muted")
+	hd.add_theme_font_override("font", GameData.font_bold)
+	cv.add_child(hd)
+	var refs := {}
+	for e in GameData.EVOS[t]:
+		var eid: String = e["id"]
+		var ev_box := VBoxContainer.new()
+		ev_box.add_theme_constant_override("separation", 6)
+		cv.add_child(ev_box)
+		var nm := _label(tr(e["name"]), "")
+		nm.add_theme_font_override("font", GameData.font_bold)
+		ev_box.add_child(nm)
+		var ds := _label(tr(e["desc"]), "Muted")
+		ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		ev_box.add_child(ds)
+		if not _has_evo(t, eid):
+			var bb := _button("", "AccentButton", 58, ic_gem)
+			bb.pressed.connect(_buy_evo.bind(t, eid))
+			ev_box.add_child(bb)
+			refs[eid] = {"buy": bb}
 			continue
-		var refs := {}
-		for e in GameData.EVOS[t]:
-			var eid: String = e["id"]
-			var ev_box := VBoxContainer.new()
-			ev_box.add_theme_constant_override("separation", 6)
-			cv.add_child(ev_box)
-			var nm := _label(tr(e["name"]), "")
-			nm.add_theme_font_override("font", GameData.font_bold)
-			ev_box.add_child(nm)
-			var ds := _label(tr(e["desc"]), "Muted")
-			ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			ev_box.add_child(ds)
-			if not _has_evo(t, eid):
-				var bb := _button("", "AccentButton", 58, ic_gem)
-				bb.pressed.connect(_buy_evo.bind(t, eid))
-				ev_box.add_child(bb)
-				refs[eid] = {"buy": bb}
-				continue
-			var ladders := {}
-			for tr_ in e["tracks"]:
-				var row := HBoxContainer.new()
-				row.add_theme_constant_override("separation", 10)
-				ev_box.add_child(row)
-				var cap := _label("", "")
-				cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-				cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-				row.add_child(cap)
-				var lb := _button("", "", 58, ic_gem)
-				lb.custom_minimum_size.x = 130
-				lb.pressed.connect(_buy_ladder.bind(t, tr_["id"]))
-				row.add_child(lb)
-				ladders[tr_["id"]] = {"label": cap, "button": lb, "name": tr_["name"]}
-			refs[eid] = {"ladders": ladders}
-		evo_refs[t] = refs
+		var ladders := {}
+		for tr_ in e["tracks"]:
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 10)
+			ev_box.add_child(row)
+			var cap := _label("", "")
+			cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			row.add_child(cap)
+			var lb := _button("", "", 58, ic_gem)
+			lb.custom_minimum_size.x = 130
+			lb.pressed.connect(_buy_ladder.bind(t, tr_["id"]))
+			row.add_child(lb)
+			ladders[tr_["id"]] = {"label": cap, "button": lb}
+		refs[eid] = {"ladders": ladders}
+	evo_refs[t] = refs
+
+
+# ---------------------------------------------------------------- значения с единицами
+
+## Число без лишних нулей: 2 → «2», 0.25 → «0.25», 1.5 → «1.5».
+static func _num(v: float) -> String:
+	if absf(v - round(v)) < 0.001:
+		return str(int(round(v)))
+	return ("%.2f" % v).rstrip("0").rstrip(".")
+
+
+func _u_cells(v: float) -> String:
+	return tr("%s кл") % _num(v)
+
+
+func _u_rate(v: String) -> String:
+	return tr("%s/с") % v
+
+
+func _u_sec(v: float) -> String:
+	return tr("%s с") % _num(v)
+
+
+static func _pct(v: float) -> String:
+	return "%s%%" % _num(v * 100.0)
+
+
+## Значение ветки эволюции на уровне lv — как его видит игрок (с единицами).
+func _ev_text(t: String, track: String, lv: int) -> String:
+	var d := GameData.evo_track(t, track)
+	var v := float(d["base"]) + float(d["step"]) * lv
+	if d.has("min"):
+		v = maxf(v, float(d["min"]))
+	match track:
+		"scout_radius", "stitch_depth", "area_radius", "lightning_range", "gravity_range":
+			return _u_cells(floorf(v))
+		"kleshch_deeper":
+			return _u_cells(v)
+		"scout_find", "stitch_share", "sprint_cap", "infection_chance", "corrosion_bonus", "war_banner_damage", \
+				"tailwind_speed", "tailwind_self":
+			return _pct(v)
+		"area_share":
+			return ("+" if v > 0.0 else "") + _pct(v)
+		"shotgun_cheap":
+			return ("−" if v > 0.0 else "") + _pct(minf(0.5, v))
+		"sprint_rate":
+			return _u_rate(_pct(v))
+		"lightning_rate", "kleshch_grip":
+			return _u_rate(_num(v))
+		"shotgun_balls":
+			return "×%d" % (1 + int(floor(v)))
+		"infection_fade":
+			return "−" + _pct(0.10 * pow(0.8, lv))   # потеря шанса за переход
+		"corrosion_linger", "war_banner_cry":
+			return _u_sec(v)
+	return _num(v)
+
+
+## «Радиус разведки: 2 кл → 3 кл»; на пределе — «…: 3 с (макс.)».
+func _ev_caption(t: String, track: String) -> String:
+	var name := tr(GameData.evo_track(t, track)["name"])
+	var lv := _el(t, track)
+	if _ladder_maxed(t, track):
+		return "%s: %s (%s)" % [name, _ev_text(t, track, lv), tr("макс.")]
+	return "%s: %s → %s" % [name, _ev_text(t, track, lv), _ev_text(t, track, lv + 1)]
 
 
 func _refresh_ui() -> void:
@@ -3116,7 +3176,7 @@ func _refresh_ui() -> void:
 				continue
 			for trk in er["ladders"]:
 				var lr: Dictionary = er["ladders"][trk]
-				lr["label"].text = "%s · %s" % [tr(lr["name"]), tr("ур. %d") % _el(t, trk)]
+				lr["label"].text = _ev_caption(t, trk)
 				if _ladder_maxed(t, trk):
 					lr["button"].text = tr("макс.")
 					lr["button"].disabled = true
@@ -3134,18 +3194,18 @@ func _track_caption(t: String, id: String) -> String:
 			tlvl[t][id] = lv + 1
 			var nxt := _speed(t) / CELL
 			tlvl[t][id] = lv
-			return tr("Скорость %.1f → %.1f кл/с") % [now, nxt]
+			return "%s: %s → %s" % [tr("Скорость"), _u_rate(_u_cells(snappedf(now, 0.1))), _u_rate(_u_cells(snappedf(nxt, 0.1)))]
 		"impact":
-			return "%s %d → %d" % [tr("Сила удара"), _damage_of(t), _damage_of(t, lv + 1)]
+			return "%s: %d → %d" % [tr("Сила удара"), _damage_of(t), _damage_of(t, lv + 1)]
 		"ticks":
-			return "%s %d → %d" % [tr("Количество тиков"), _poison_ticks(), _poison_ticks() + 1]
+			return "%s: %d → %d" % [tr("Количество тиков"), _poison_ticks(), _poison_ticks() + 1]
 		"cadence":
-			return "%s %.1f → %.1f" % [tr("Частота тиков яда"), _poison_rate(), _poison_rate() + 0.5]
+			return "%s: %s → %s" % [tr("Частота тиков яда"), _u_rate(_num(_poison_rate())), _u_rate(_num(_poison_rate() + 0.5))]
 		"radius":
 			var rc := _aura_radius() / CELL
-			return "%s %d → %d" % [tr("Радиус ауры"), int(rc), int(rc) + 1]
+			return "%s: %s → %s" % [tr("Радиус ауры"), _u_cells(int(rc)), _u_cells(int(rc) + 1)]
 		"hold":
-			return "%s %.1f → %.1f" % [tr("Длительность бафа"), _aura_hold(), _aura_hold() + 0.5]
+			return "%s: %s → %s" % [tr("Длительность бафа"), _u_sec(_aura_hold()), _u_sec(_aura_hold() + 0.5)]
 	return id
 
 

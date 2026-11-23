@@ -231,6 +231,22 @@ func _run() -> void:
 	await _tap_at(ub.get_global_rect().get_center())
 	await _wait(0.2)
 	check(g.unl["sniper"] and g.run_u == 2, "тип открывается касанием за 1 U")
+	# всё на одной странице: вкладок нет, эволюции — в карточке шара; покупка касанием, подписи со значениями
+	check(not tabs.tabs_visible, "прокачка на одной странице (без вкладок)")
+	g.run_u = 12
+	g._refresh_ui()
+	await _wait(0.2)
+	var eb: Button = g.evo_refs["basic"]["scout"]["buy"]
+	var sc1: ScrollContainer = tabs.get_child(0)
+	sc1.ensure_control_visible(eb)
+	await _wait(0.3)
+	await _tap_at(eb.get_global_rect().get_center())
+	await _wait(0.3)
+	check(g._has_evo("basic", "scout") and g.run_u == 7, "эволюция покупается касанием на той же странице")
+	var cap: Label = g.evo_refs["basic"]["scout"]["ladders"]["scout_radius"]["label"]
+	check("→" in cap.text and "кл" in cap.text, "у ветки эволюции видны значения: %s" % cap.text)
+	sc1.ensure_control_visible(cap)
+	await _wait(0.3)
 	await _wait(0.3)
 	await _shot("perks")
 	check(await _tap("Вернуться к игре"), "кнопка «Вернуться к игре»")
