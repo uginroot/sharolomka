@@ -184,4 +184,5 @@ const T := {
 	"Компьютеры": "Computer",
 	"Флот": "Flotte",
 	"Поле и техника": "Landtechnik",
+	"Расчистите карту целиком — ещё +%d ★": "Räume die ganze Karte frei — noch +%d ★",
 }

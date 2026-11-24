@@ -78,6 +78,15 @@ var finale := false              # финал: шары летят к после
 var finale_ids := PackedInt32Array()
 var finale_dist := PackedInt32Array()
 var finale_t := 0.0
+var full_tracked := false        # знаем число всех квадратов (маленькие карты и карты-картины) — есть полная расчистка
+var finale_pass := PackedByteArray()   # финал: 1 — свободная клетка (по ней идёт поле расстояний)
+var bfs_q := PackedInt32Array()        # поле расстояний считается порциями (на больших картах — полмиллиона клеток)
+var bfs_head := 0
+var bfs_dist := PackedInt32Array()
+var bfs_busy := false
+const BFS_BUDGET := 40000              # клеток поля за кадр
+const FINALE_BIG_SHARE := 0.01         # финал большой карты — последний 1% квадратов, но не больше FINALE_BIG_MAX
+const FINALE_BIG_MAX := 2000
 var ex0 := 0
 var ey0 := 0
 var ex1 := 0
@@ -291,6 +300,24 @@ func _ready() -> void:
 				if c.kind[li] == 1:
 					alive += 1
 		total = alive + destroyed
+	elif map.has("pic"):
+		# число квадратов картины известно из маски: все свободные клетки минус пустая площадка у старта
+		var reg = _region(0, 0)
+		var m: PackedByteArray = reg["mask"]
+		var n := 0
+		for v in m:
+			if v == 0:
+				n += 1
+		var sc2 := START_CLEAR * START_CLEAR
+		var r := int(ceil(START_CLEAR))
+		for yy in range(start_cell.y - r, start_cell.y + r + 1):
+			for xx in range(start_cell.x - r, start_cell.x + r + 1):
+				if xx >= 0 and yy >= 0 and xx < W and yy < H and m[yy * W + xx] == 0 \
+						and (Vector2(xx + 0.5, yy + 0.5) - start_pos * INV).length_squared() <= sc2:
+					n -= 1
+		total = n
+		alive = total - destroyed
+	full_tracked = track_all or map.has("pic")
 	goal = total if int(map["goal"]) == 0 else int(map["goal"])
 	# U-баллы: в среднем U_PER_LEVEL до цели уровня (+20% за уровень «Поиска U»)
 	u_ppm = int(minf(U_PER_LEVEL / maxf(1.0, float(goal)) * 1.0e6 * (1.0 + 0.2 * GameData.meta_level("u_find")), 200000.0))
@@ -1378,6 +1405,8 @@ func _spawn_ball(t: String, ang: float, at = null) -> void:
 func _sim(dt: float) -> void:
 	time_acc += dt
 	if finale:
+		if bfs_busy:
+			_finale_field_step()
 		finale_t -= dt
 		if finale_t <= 0.0:
 			finale_t = 1.0
@@ -2009,6 +2038,8 @@ func _damage(id: int, amount: int, b) -> void:
 		c.solid -= 1
 		destroyed += 1
 		alive -= 1
+		if finale and finale_pass.size() == W * H:
+			finale_pass[id] = 1   # разбитая клетка стала проходом для поля расстояний
 		_on_destroyed(x, y, id)
 
 
@@ -2072,9 +2103,22 @@ func _tick_poison(dt: float) -> void:
 func _start_finale() -> void:
 	finale = true
 	finale_ids = PackedInt32Array()
+	finale_pass.resize(W * H)
+	finale_pass.fill(0)
 	for ck in chunks.size():
 		var c = chunks[ck]
-		if c == null or c.solid == 0:
+		if c == null:
+			c = _get_chunk(ck)   # большая карта: досоздаём ещё не открытые куски — там тоже остались квадраты
+		var ox: int = (ck % cw) * CS
+		@warning_ignore("integer_division")
+		var oy: int = (ck / cw) * CS
+		for li in CS * CS:
+			if c.kind[li] == 0:
+				var px := ox + (li & 31)
+				var py := oy + (li >> 5)
+				if px < W and py < H:
+					finale_pass[py * W + px] = 1
+		if c.solid == 0:
 			continue
 		for li in CS * CS:
 			if c.kind[li] == 1:
@@ -2095,42 +2139,49 @@ func _start_finale() -> void:
 
 ## Поле расстояний финала: обход в ширину от оставшихся квадратов по свободным клеткам.
 ## Шар поворачивает к соседней клетке, которая ближе к цели, — так он обходит стены
-## (наведение «по прямой» не находило квадраты в выемках картинок).
+## (наведение «по прямой» не находило квадраты в выемках картинок). Считается порциями по BFS_BUDGET клеток
+## за кадр; готовое поле подменяет старое — на большой карте нет паузы на полный обход.
 func _finale_field() -> void:
-	finale_dist.resize(W * H)
-	finale_dist.fill(1 << 30)
-	var q := PackedInt32Array()
+	if bfs_busy:
+		return
+	bfs_dist.resize(W * H)
+	bfs_dist.fill(1 << 30)
+	bfs_q = PackedInt32Array()
 	var live := PackedInt32Array()
 	for id in finale_ids:
 		if _hp_of(id) > 0:
 			live.append(id)
-			finale_dist[id] = 0
-			q.append(id)
+			bfs_dist[id] = 0
+			bfs_q.append(id)
 	finale_ids = live
-	var head := 0
-	while head < q.size():
-		var id := q[head]
-		head += 1
+	bfs_head = 0
+	bfs_busy = true
+	_finale_field_step()
+
+
+func _finale_field_step() -> void:
+	var budget := BFS_BUDGET
+	var n := W * H
+	while bfs_head < bfs_q.size() and budget > 0:
+		budget -= 1
+		var id := bfs_q[bfs_head]
+		bfs_head += 1
 		var x := id % W
-		@warning_ignore("integer_division")
-		var y := id / W
-		var nd := finale_dist[id] + 1
-		for o in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-			var xx: int = x + o.x
-			var yy: int = y + o.y
-			if xx < 0 or yy < 0 or xx >= W or yy >= H:
+		var nd := bfs_dist[id] + 1
+		for j in [id - 1 if x > 0 else -1, id + 1 if x < W - 1 else -1, id - W, id + W]:
+			if j < 0 or j >= n or bfs_dist[j] <= nd or finale_pass[j] == 0:
 				continue
-			var j: int = yy * W + xx
-			if finale_dist[j] <= nd or _kind_at(xx, yy) != 0:
-				continue
-			finale_dist[j] = nd
-			q.append(j)
+			bfs_dist[j] = nd
+			bfs_q.append(j)
+	if bfs_head >= bfs_q.size():
+		finale_dist = bfs_dist.duplicate()
+		bfs_busy = false
 
 
 func _finale_steer(b) -> void:
 	var cx := int(b.pos.x * INV)
 	var cy := int(b.pos.y * INV)
-	if cx < 0 or cy < 0 or cx >= W or cy >= H:
+	if cx < 0 or cy < 0 or cx >= W or cy >= H or finale_dist.size() != W * H:
 		return
 	var best := finale_dist[cy * W + cx]
 	var to := Vector2i(-1, -1)
@@ -2153,8 +2204,11 @@ func _finale_steer(b) -> void:
 
 
 func _check_goal() -> void:
-	if track_all and not finale and alive > 0 and alive <= maxi(12, int(total * FINALE_SHARE)):
-		_start_finale()
+	if full_tracked and not finale and alive > 0:
+		var lim := maxi(12, int(total * FINALE_SHARE)) if track_all \
+			else maxi(12, mini(FINALE_BIG_MAX, int(total * FINALE_BIG_SHARE)))
+		if alive <= lim:
+			_start_finale()
 
 	if not goal_done and destroyed >= goal:
 		goal_done = true
@@ -2167,16 +2221,29 @@ func _check_goal() -> void:
 		GameData.save_game()
 		if not (track_all and alive <= 0):
 			Sfx.play("goal", 0.0)
-			_show_toast(tr("Цель уровня выполнена!\n+%d ★, открыт следующий уровень") % gained + "\n" +
-				tr("Время: %s") % GameData.fmt_time(play_time))
-	if track_all and alive <= 0 and not completed:
+			var msg: String = tr("Цель уровня выполнена!\n+%d ★, открыт следующий уровень") % gained + "\n" + \
+				tr("Время: %s") % GameData.fmt_time(play_time)
+			if full_tracked and not track_all:
+				# на большой карте можно идти дальше — за полную расчистку ещё ★
+				msg += "\n" + tr("Расчистите карту целиком — ещё +%d ★") % GameData.stars_for(map_index, not GameData.maps_full.has(id))
+			_show_toast(msg)
+	if full_tracked and alive <= 0 and not completed:
 		completed = true
+		var bonus := ""
+		if not track_all:
+			# большая карта расчищена целиком — награда ★ (первый раз как за цель, потом +1)
+			var fid := String(map["id"])
+			var fg := GameData.stars_for(map_index, not GameData.maps_full.has(fid))
+			GameData.stars += fg
+			GameData.maps_full[fid] = true
+			bonus = "\n+%d ★" % fg
+			Sfx.play("goal", 0.0)
 		GameData.map_states.erase(String(map["id"]))
 		DirAccess.remove_absolute(_save_path())
 		GameData.save_game()
 		var d := AcceptDialog.new()
 		d.title = tr("Победа!")
-		d.dialog_text = tr("Карта «%s» разбита полностью!") % Maps.title(map, tr)
+		d.dialog_text = tr("Карта «%s» разбита полностью!") % Maps.title(map, tr) + bonus
 		d.ok_button_text = tr("В меню")
 		ui_root.add_child(d)
 		d.confirmed.connect(_to_menu)

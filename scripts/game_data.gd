@@ -154,6 +154,7 @@ var meta := {}               # постоянные улучшения: id → �
 var unlocked := {}           # типы, открытые на старте уровня (только Пронизывающий)
 var maps_unlocked := 1
 var maps_done := {}
+var maps_full := {}          # большие карты, расчищенные целиком (за первую полную расчистку — больше ★)
 var map_states := {}
 var map_stats := {}          # статистика уровней: id → {"first": с, "best": с, "runs": n}
 var current_map := 0
@@ -294,6 +295,7 @@ func _reset_defaults() -> void:
 	meta = {}
 	maps_unlocked = 1
 	maps_done = {}
+	maps_full = {}
 	map_states = {}
 	map_stats = {}
 	refresh_unlocked()
@@ -358,7 +360,7 @@ func save_game() -> void:
 	_save_wait = 0.0
 	write_atomic(save_path(), JSON.stringify({
 		"ver": 2, "stars": stars, "meta": meta, "maps_unlocked": maps_unlocked,
-		"maps_done": maps_done, "map_states": map_states, "map_stats": map_stats,
+		"maps_done": maps_done, "map_states": map_states, "map_stats": map_stats, "maps_full": maps_full,
 		"played_at": Time.get_unix_time_from_system(),
 	}))
 
@@ -383,6 +385,7 @@ func load_game() -> void:
 	maps_unlocked = maxi(1, _int(data.get("maps_unlocked", 1)))
 	maps_done = _dict(data.get("maps_done", {}))
 	map_states = _dict(data.get("map_states", {}))
+	maps_full = _dict(data.get("maps_full", {}))
 	var ms: Dictionary = _dict(data.get("map_stats", {}))
 	for id in ms:
 		var e: Dictionary = _dict(ms[id])

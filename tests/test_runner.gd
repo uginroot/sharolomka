@@ -2160,3 +2160,42 @@ func test_recall_fill() -> void:
 	g.reset_cd["basic"] = 0.0
 	g._refresh_ui()
 	check(not g.reset_fill.visible, "после перезарядки заливка не скрылась")
+
+
+
+## Большая карта (картина): число квадратов известно; цель — подсказка про полную расчистку; финал на последнем 1%
+## (досоздаёт все куски, поле расстояний считается порциями); полная расчистка — ★ и «Победа».
+func test_big_map_full_clear() -> void:
+	var g = await new_game(4, func(): GameData.maps_unlocked = 5)
+	check(g.full_tracked and not g.track_all and g.total > 100000 and g.alive == g.total, "большая карта не знает число квадратов: %d" % g.total)
+	# сверка с настоящим числом квадратов (досоздаём все куски)
+	var real := 0
+	for ck in g.chunks.size():
+		var c = g._get_chunk(ck)
+		for li in 1024:
+			if c.kind[li] == 1:
+				real += 1
+	check(real == g.total, "число квадратов картины %d, а на деле %d" % [g.total, real])
+	# цель: подсказка про полную расчистку
+	g.destroyed = g.goal
+	g._check_goal()
+	check(g.goal_done and "Расчистите карту целиком" in g.toast_label.text, "нет подсказки про полную расчистку: %s" % g.toast_label.text)
+	# финал: на последнем 1%
+	g.alive = 500
+	g._check_goal()
+	check(g.finale and g.finale_pass.size() == g.W * g.H, "финал большой карты не начался")
+	var frames := 0
+	while g.bfs_busy and frames < 200:
+		g._sim(0.016)
+		frames += 1
+	check(not g.bfs_busy and g.finale_dist.size() == g.W * g.H, "поле расстояний не досчиталось за %d кадров" % frames)
+	check(frames > 1, "поле расстояний посчиталось за один кадр — на большой карте была бы пауза")
+	# полная расчистка
+	var s0: int = GameData.stars
+	g.alive = 0
+	g._check_goal()
+	check(g.completed and GameData.maps_full.has("mountains"), "полная расчистка не засчитана")
+	check(GameData.stars - s0 == GameData.stars_for(4, true), "за полную расчистку %d ★, а не %d" % [GameData.stars - s0, GameData.stars_for(4, true)])
+	for n in g.ui_root.get_children():
+		if n is AcceptDialog:
+			n.queue_free()
