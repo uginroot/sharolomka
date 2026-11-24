@@ -2929,6 +2929,7 @@ var ic_coin: ImageTexture
 var ic_gem: ImageTexture
 var prog_bar: ProgressBar
 var frenzy_label: Label
+var ic_refresh: Texture2D
 var frenzy_bar: Control
 var frenzy_prog: ProgressBar
 
@@ -3031,11 +3032,6 @@ func _build_ui() -> void:
 	var tr := HBoxContainer.new()
 	tr.add_theme_constant_override("separation", 8)
 	tv.add_child(tr)
-	var bmenu := _button("", "", 52, Icons.menu(40))
-	bmenu.custom_minimum_size.x = 56
-	bmenu.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	bmenu.pressed.connect(_to_menu)
-	tr.add_child(bmenu)
 	lbl_rub = _pill(ic_coin, GameData.C_GOLD)
 	tr.add_child(lbl_rub.get_parent().get_parent())
 	lbl_u = _pill(ic_gem, GameData.C_GEM)
@@ -3053,9 +3049,12 @@ func _build_ui() -> void:
 	prog_bar.custom_minimum_size.y = 10
 	prog_bar.max_value = 1.0
 	pv.add_child(prog_bar)
-	btn_snap = _button("", "", 52, Icons.angle(40))
-	btn_snap.pressed.connect(_cycle_snap)
-	tr.add_child(btn_snap)
+	# кнопка меню — справа (выбор угла переехал вниз)
+	var bmenu := _button("", "", 52, Icons.menu(40))
+	bmenu.custom_minimum_size.x = 56
+	bmenu.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bmenu.pressed.connect(_to_menu)
+	tr.add_child(bmenu)
 	top_bar.resized.connect(_on_bars_resized)
 
 	# --- нижняя панель: выбор шара, сброс, прокачка
@@ -3076,15 +3075,21 @@ func _build_ui() -> void:
 	var br := HBoxContainer.new()
 	br.add_theme_constant_override("separation", 10)
 	bv.add_child(br)
-	btn_reset = _button("", "ChipButton", 64, Icons.refresh(40))
-	btn_reset.toggle_mode = true
-	btn_reset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn_reset.pressed.connect(_reset_stuck)
-	br.add_child(btn_reset)
+	# нижний ряд: прокачка, угол, сброс (длинные надписи переносятся, а не вылезают)
 	var bup := _button(tr("Прокачка"), "AccentButton", 64, Icons.arrow_up(40))
-	bup.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bup.pressed.connect(_show_upgrades.bind(true))
-	br.add_child(bup)
+	btn_snap = _button("", "", 64, Icons.angle(40))
+	btn_snap.pressed.connect(_cycle_snap)
+	ic_refresh = Icons.refresh(40)
+	btn_reset = _button("", "ChipButton", 64, ic_refresh)
+	btn_reset.toggle_mode = true
+	btn_reset.pressed.connect(_reset_stuck)
+	for bb in [bup, btn_snap, btn_reset]:
+		bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		bb.custom_minimum_size.x = 0
+		bb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		bb.add_theme_font_size_override("font_size", 23)
+		br.add_child(bb)
 	bottom_bar.resized.connect(_on_bars_resized)
 
 	# --- полоска «золотой лихорадки» под верхней панелью: убывает, поверх — надпись с таймером.
@@ -3524,6 +3529,8 @@ func _refresh_ui() -> void:
 		chips[t].get_meta("price").text = GameData.fmt(price)
 		chips[t].modulate = Color(1, 1, 1, 1.0 if coins >= price else 0.6)
 	var cd: float = reset_cd[selected]
+	# в режиме «прицельтесь» значок скрыт — подсвеченная рамка уже показывает режим, а длинному тексту нужно место
+	btn_reset.icon = null if reset_armed else ic_refresh
 	if reset_armed:
 		btn_reset.text = tr("Сброс: прицельтесь")
 	elif cd > 0.0:

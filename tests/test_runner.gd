@@ -19,6 +19,11 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# окно как у телефона (портрет 720×1280): без этого в режиме без экрана окно 64×64, видимая область
+	# 1280×1280, и проверки вёрстки «не вылезает за экран» шли на ширине 1280 (найдено в v0.32)
+	get_window().size = Vector2i(720, 1280)
+	await get_tree().process_frame
+	await get_tree().process_frame
 	var only := OS.get_cmdline_user_args()
 	var names: Array = []
 	for m in get_method_list():
@@ -544,6 +549,40 @@ func test_bottom_bar_fits() -> void:
 		check(r.end.x <= vw + 0.5, "фишка %s за краем экрана" % t)
 	check(g.chips["basic"].get_meta("price").text != "", "на фишке нет цены")
 	check(g.top_bar.size.x <= vw + 0.5, "верхняя панель %.0f px шире экрана" % g.top_bar.size.x)
+	# нижний ряд: прокачка, угол, сброс — в этом порядке; меню справа вверху; надписи не вылезают на всех языках
+	var row: HBoxContainer = g.btn_snap.get_parent()
+	check(row.get_child(0).text == tr("Прокачка") and row.get_child(1) == g.btn_snap and row.get_child(2) == g.btn_reset,
+		"порядок нижних кнопок не «прокачка, угол, сброс»")
+	check(g.btn_snap.get_parent().get_parent().get_parent().get_parent() == g.bottom_bar, "выбор угла не внизу")
+	var top_row: HBoxContainer = g.lbl_rub.get_parent().get_parent().get_parent()
+	check(top_row.get_child(top_row.get_child_count() - 1) is Button, "кнопка меню не справа вверху")
+	for code in ["ru", "de", "hi", "vi"]:
+		GameData.lang_choice = code
+		GameData.apply_settings()
+		for mode in [0, 1, 2]:
+			g.snap_mode = mode
+			for armed in [false, true]:
+				g.reset_armed = armed
+				g.reset_cd["basic"] = 0.0 if armed else 28.0
+				g._refresh_ui()
+				await get_tree().process_frame
+				for bb in [row.get_child(0), g.btn_snap, g.btn_reset]:
+					check(bb.get_global_rect().end.x <= vw + 0.5, "%s: кнопка «%s» за краем экрана" % [code, bb.text])
+					var fsz: int = bb.get_theme_font_size("font_size")
+					var w1: float = GameData.font.get_string_size(bb.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
+					# с переносом строки текст может занимать 2 строки — ширина самого длинного слова должна влезать
+					var longest := 0.0
+					for word in bb.text.split(" "):
+						longest = maxf(longest, GameData.font.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x)
+					# реальное место под текст: ширина кнопки минус отступы стиля, значок и промежуток до текста
+					var sb: StyleBox = bb.get_theme_stylebox("normal")
+					var room: float = bb.size.x - sb.get_content_margin(SIDE_LEFT) - sb.get_content_margin(SIDE_RIGHT)
+					if bb.icon != null:
+						room -= float(bb.get_theme_constant("icon_max_width")) + float(bb.get_theme_constant("h_separation"))
+					check(longest <= room + 0.5, "%s: слово не влезает в кнопку «%s» (%.0f > %.0f)" % [code, bb.text, longest, room])
+	g.reset_armed = false
+	GameData.lang_choice = "ru"
+	GameData.apply_settings()
 	# окно прокачки: карточки и узлы дерева не шире экрана (крупный шрифт, длинные слова)
 	for code in ["ru", "de", "vi"]:
 		GameData.lang_choice = code
