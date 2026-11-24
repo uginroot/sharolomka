@@ -2019,11 +2019,35 @@ func test_ball_markers() -> void:
 			# разные либо контур, либо белый рисунок внутри (блик, капля, обод) — кроме пары без отличий
 			check(not shape_same or absi(white_a - white_b) > 6 or types[i] + types[j] == "basicsniper",
 				"силуэты %s и %s не различаются" % [types[i], types[j]])
+	# значки на фишках различаются у ВСЕХ пар — включая Пронизывающий/Гесиевый (шлейф нарисован в значке)
+	for i in types.size():
+		for j in range(i + 1, types.size()):
+			var a2: Image = g.ui_icons[types[i]].get_image()
+			var b2: Image = g.ui_icons[types[j]].get_image()
+			var d2 := 0
+			for y in range(0, a2.get_height(), 2):
+				for x in range(0, a2.get_width(), 2):
+					if absf(a2.get_pixel(x, y).a - b2.get_pixel(x, y).a) > 0.5:
+						d2 += 1
+					else:
+						var pa := a2.get_pixel(x, y)
+						var pb := b2.get_pixel(x, y)
+						if pa.a > 0.5 and (pa.r > 0.9 and pa.g > 0.9 and pa.b > 0.9) != (pb.r > 0.9 and pb.g > 0.9 and pb.b > 0.9):
+							d2 += 1
+			check(d2 > 40, "значки %s и %s на фишках почти одинаковы (отличий %d)" % [types[i], types[j], d2])
+	# флажок Знаменосца крупный: над шаром заметная непрозрачная область
+	var bimg: Image = g.ui_icons["banner"].get_image()
+	var flag := 0
+	for y in int(bimg.get_height() * 0.25):
+		for x in bimg.get_width():
+			if bimg.get_pixel(x, y).a > 0.5:
+				flag += 1
+	check(flag > 120, "флажок Знаменосца слишком мелкий: %d px" % flag)
 	g._refresh_ui()
 	var chip_icon: TextureRect = null
 	for n in g.chips["splash"].find_children("*", "TextureRect", true, false):
 		chip_icon = n
-	check(chip_icon != null and chip_icon.texture == g.ball_icons["splash"], "на фишке не тот значок, что на поле")
+	check(chip_icon != null and chip_icon.texture == g.ui_icons["splash"], "на фишке не значок типа")
 	g._select("pierce")
 	check(g.highlight_type == "pierce" and g.highlight_t > 1.0, "выбор типа не включил подсветку")
 	for k in 15:

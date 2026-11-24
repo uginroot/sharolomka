@@ -139,7 +139,8 @@ var redraw_t := 0.0
 var lod := 0                     # 0 — с цифрами, 1 — «свет», 2 — грубо, по текстуре на кусок
 var ball_layer: Node2D
 var ball_tex: ImageTexture
-var ball_icons := {}             # силуэт шара по типу: на поле, на фишках и в карточках прокачки
+var ball_icons := {}             # силуэт шара по типу на поле
+var ui_icons := {}               # значок типа для фишек и карточек (у Гесиевого шлейф нарисован в значке)
 var highlight_type := ""         # подсветка шаров выбранного типа (на фишке нажали) …
 var highlight_t := 0.0           # … и сколько ей ещё гореть
 const HIGHLIGHT_TIME := 1.2
@@ -232,6 +233,7 @@ func _ready() -> void:
 	ball_tex = Icons.ball(64)
 	for t in GameData.TYPE_ORDER:
 		ball_icons[t] = Icons.ball_type(t, GameData.TYPES[t]["color"])
+		ui_icons[t] = Icons.ball_type(t, GameData.TYPES[t]["color"], 96, true)
 
 	W = int(map["w"])
 	H = int(map["h"])
@@ -3345,7 +3347,7 @@ func _card_head(parent: VBoxContainer, t: String, locked: bool) -> Label:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 10)
 	parent.add_child(h)
-	h.add_child(_icon_rect(ball_icons[t] if not locked else Icons.lock(40), 40 if not locked else 32))
+	h.add_child(_icon_rect(ui_icons[t] if not locked else Icons.lock(40), 40 if not locked else 32))
 	var n := _label(tr(def["name"]), "Title")
 	h.add_child(n)
 	var extra := _label("", "Muted")
@@ -3392,7 +3394,7 @@ func _rebuild_rows() -> void:
 			top.add_theme_constant_override("separation", 4)
 			top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			cv.add_child(top)
-			var ic := _icon_rect(ball_icons[t], 34)   # тот же силуэт, что на поле
+			var ic := _icon_rect(ui_icons[t], 34)   # тот же силуэт, что на поле (у Гесиевого — со шлейфом)
 			ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			top.add_child(ic)
 			var cnt := Label.new()
