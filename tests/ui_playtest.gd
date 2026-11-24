@@ -232,10 +232,19 @@ func _run() -> void:
 	g._show_upgrades(true)
 	g._refresh_ui()
 	await _wait(0.2)
+	# вкладки шаров: касание вкладки открывает карточку этого шара, остальные карточки скрыты
+	var tab_sn: Button = g.upg_tabs_btn["sniper"]["button"]
+	await _tap_at(tab_sn.get_global_rect().get_center())
+	await _wait(0.2)
+	check(g.upg_type == "sniper" and g.shop_refs["sniper"]["card"].visible and not g.shop_refs["basic"]["card"].visible,
+		"касание вкладки открывает карточку шара")
+	check(g.upg_tabs_btn["sniper"]["badge"].visible, "на вкладке закрытого шара при U есть зелёный счётчик")
 	var ub: Button = g.shop_refs["sniper"]["unlock"]
 	await _tap_at(ub.get_global_rect().get_center())
 	await _wait(0.2)
 	check(g.unl["sniper"] and g.run_u == 2, "тип открывается касанием за 1 U")
+	g._open_upg_tab("basic")
+	await _wait(0.2)
 	# всё на одной странице: вкладок нет, эволюции — в карточке шара; покупка касанием, подписи со значениями
 	check(not tabs.tabs_visible, "прокачка на одной странице (без вкладок)")
 	g.run_u = 12
@@ -247,7 +256,7 @@ func _run() -> void:
 	await _wait(0.3)
 	await _tap_at(eb.get_global_rect().get_center())
 	await _wait(0.3)
-	check(g._has_evo("basic", "scout") and g.run_u == 7, "эволюция покупается касанием на той же странице")
+	check(g._has_evo("basic", "scout") and g.run_u == 7, "эволюция покупается касанием кнопки ◆ в карточке шара")
 	var cap: Label = g.evo_refs["basic"]["scout"]["ladders"]["scout_radius"]["label"]
 	check("→" in cap.text and "кл" in cap.text, "у ветки эволюции видны значения: %s" % cap.text)
 	sc1.ensure_control_visible(cap)

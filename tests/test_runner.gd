@@ -1825,7 +1825,7 @@ func test_ball_damage_stats() -> void:
 	g._show_upgrades(true)
 	g._refresh_ui()
 	var total: int = g.dmg_total["splash"]   # шары продолжали летать, пока шёл яд, — урон мог вырасти
-	check(("Нанесено урона: %s" % GameData.fmt(total)) in g.shop_refs["splash"]["stat"].text, "строка статистики: %s" % g.shop_refs["splash"]["stat"].text)
+	check(g.shop_refs["splash"]["stat"].text.begins_with(GameData.fmt(total) + " · "), "статистика в заголовке карточки: %s" % g.shop_refs["splash"]["stat"].text)
 	g._save_state()
 	game.queue_free()
 	game = null
@@ -2199,3 +2199,39 @@ func test_big_map_full_clear() -> void:
 	for n in g.ui_root.get_children():
 		if n is AcceptDialog:
 			n.queue_free()
+
+
+
+## Прокачка: вкладки шаров, видна одна карточка, зелёный счётчик доступных покупок, компактные строки.
+func test_upgrade_tabs() -> void:
+	var g = await new_game(2)
+	g.coins = 0
+	g.run_u = 0
+	g._show_upgrades(true)
+	g._refresh_ui()
+	check(g.upg_type == g.selected, "прокачка открылась не на выбранном в игре шаре")
+	var shown := 0
+	for t in g.shop_refs:
+		if g.shop_refs[t]["card"].visible:
+			shown += 1
+	check(shown == 1, "видно карточек: %d" % shown)
+	check(not g.upg_tabs_btn["basic"]["badge"].visible, "счётчик при нуле денег")
+	g.coins = 100000
+	g.run_u = 6
+	g._refresh_ui()
+	check(g.upg_tabs_btn["basic"]["badge"].visible and int(g.upg_tabs_btn["basic"]["badge_label"].text) == g._affordable("basic"),
+		"счётчик доступных покупок: %s" % g.upg_tabs_btn["basic"]["badge_label"].text)
+	check(g._affordable("basic") == 2 + 2, "у Пронизывающего доступно %d (2 ветки за монеты + 2 эволюции)" % g._affordable("basic"))
+	g._open_upg_tab("splash")
+	check(g.shop_refs["splash"]["card"].visible and not g.shop_refs["basic"]["card"].visible, "вкладка не переключила карточку")
+	check(g._arrow("8.3 кл/с", "9.9 кл/с") == "8.3 → 9.9 кл/с" and g._arrow("10%", "20%") == "10 → 20%" and g._arrow("×3", "×4") == "×3 → ×4" \
+		and g._arrow("−10%", "−8%") == "−10 → −8%", "_arrow: %s | %s" % [g._arrow("8.3 кл/с", "9.9 кл/с"), g._arrow("×3", "×4")])
+	# строка ветки — значение без названия и без повторов единиц
+	var lb: Label = g.shop_refs["basic"]["tracks"]["speed"]["label"]
+	check(lb.text.count("кл/с") == 1 and "→" in lb.text and not ("Скорость" in lb.text), "строка скорости: %s" % lb.text)
+	# эволюции — кнопки ◆ у некупленных и у веток купленных
+	check(g.evo_refs["basic"]["scout"]["buy"].icon == g.ic_gem, "у некупленной эволюции нет кнопки ◆")
+	g._buy_evo("basic", "scout")
+	g._refresh_ui()
+	var lr: Dictionary = g.evo_refs["basic"]["scout"]["ladders"]["scout_radius"]
+	check(lr["button"].icon == g.ic_gem and lr["button"].text == "1" and lr["label"].text == "2 → 3 кл", "строка ветки эволюции: «%s» [%s]" % [lr["label"].text, lr["button"].text])

@@ -203,6 +203,11 @@ var upg_margin: MarginContainer
 var upg_rub: Label
 var upg_u: Label
 var shop_box: VBoxContainer
+var upg_tab_box: HBoxContainer
+var upg_tabs_btn := {}           # тип → {button, count, badge}
+var upg_type := "basic"          # чья карточка открыта в прокачке
+var upg_tab_group := ButtonGroup.new()
+var upg_scroll: ScrollContainer
 var perk_box: VBoxContainer
 var shop_refs := {}
 var perk_refs := {}
@@ -3254,8 +3259,7 @@ func _build_ui() -> void:
 	# от самого левого края, со скруглением как у кнопки (раньше появлялась лишь через ~5 с и с отступа)
 	reset_fill = Control.new()
 	reset_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	reset_fill.clip_contents = true
-	reset_fill.anchor_bottom = 1.0
+	reset_fill.clip_contents = true   # без растяжения по краям: размер задаётся явно в _layout_reset_fill
 	btn_reset.add_child(reset_fill)
 	reset_fill_panel = Panel.new()
 	reset_fill_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -3335,7 +3339,7 @@ func _build_ui() -> void:
 	upg.add_child(upg_margin)
 	var up := PanelContainer.new()
 	var ups := StyleBoxFlat.new()
-	ups.bg_color = Color(0.08, 0.09, 0.14, 0.86)
+	ups.bg_color = Color(0.08, 0.09, 0.14, 0.98)   # плотный фон: карточка одна, под ней не должно просвечивать поле
 	ups.set_corner_radius_all(22)
 	ups.border_color = Color(1, 1, 1, 0.08)
 	ups.set_border_width_all(1)
@@ -3358,6 +3362,10 @@ func _build_ui() -> void:
 	uh.add_child(upg_rub.get_parent().get_parent())
 	upg_u = _pill(ic_gem, GameData.C_GEM)
 	uh.add_child(upg_u.get_parent().get_parent())
+	# вкладки шаров: значок, число шаров, зелёный счётчик того, что можно купить (закрытый — замок и «1 U»)
+	upg_tab_box = HBoxContainer.new()
+	upg_tab_box.add_theme_constant_override("separation", 6)
+	uv.add_child(upg_tab_box)
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	uv.add_child(tabs)
@@ -3376,6 +3384,7 @@ func _build_ui() -> void:
 		m.add_child(vb)
 		if k == 0:
 			shop_box = vb
+			upg_scroll = sc
 		else:
 			perk_box = vb
 		var ts = TouchScroll.new()   # прокрутка пальцем, даже если палец лёг на кнопку
@@ -3424,6 +3433,8 @@ func _on_bars_resized() -> void:
 
 
 func _show_upgrades(show: bool) -> void:
+	if show and not upg.visible:
+		_open_upg_tab(selected if unl[selected] else "basic")   # открывается шар, выбранный в игре
 	upg.visible = show
 	touches.clear()
 	pinch = false
@@ -3461,17 +3472,20 @@ func _card_head(parent: VBoxContainer, t: String, locked: bool) -> Label:
 	h.add_child(_icon_rect(ui_icons[t] if not locked else Icons.lock(40), 40 if not locked else 32))
 	var n := _label(tr(def["name"]), "Title")
 	h.add_child(n)
-	var extra := _label("", "Muted")
-	extra.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	extra.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	h.add_child(extra)
-	return extra
+	var stat := _label("", "Muted")   # урон за уровень · в секунду за 10 с
+	stat.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stat.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	stat.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+	h.add_child(stat)
+	return stat
 
 
 func _rebuild_rows() -> void:
-	for box in [shop_box, perk_box, chips_box]:
+	for box in [shop_box, perk_box, chips_box, upg_tab_box]:
 		for c in box.get_children():
 			c.queue_free()
+	upg_tabs_btn.clear()
+	upg_tab_group = ButtonGroup.new()
 	shop_refs.clear()
 	perk_refs.clear()
 	evo_refs.clear()
@@ -3523,54 +3537,150 @@ func _rebuild_rows() -> void:
 			chip.set_meta("cnt", cnt)
 			chip.set_meta("price", price)
 
-		# --- карточка шара: описание, бонус стаи, ветки за монеты; закрытый — «Открыть · 1 U»
+		# --- вкладка шара в прокачке
+		var tb := _button("", "ChipButton", 66)
+		tb.toggle_mode = true
+		tb.button_group = upg_tab_group
+		tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tb.custom_minimum_size.x = 0
+		tb.pressed.connect(_open_upg_tab.bind(t))
+		upg_tab_box.add_child(tb)
+		var tv := VBoxContainer.new()
+		tv.set_anchors_preset(Control.PRESET_FULL_RECT)
+		tv.alignment = BoxContainer.ALIGNMENT_CENTER
+		tv.add_theme_constant_override("separation", 0)
+		tv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tb.add_child(tv)
+		var tic := _icon_rect(ui_icons[t] if unlocked else Icons.lock(40), 30 if unlocked else 24)
+		tic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		tv.add_child(tic)
+		var tcnt := Label.new()
+		tcnt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tcnt.add_theme_font_size_override("font_size", 17)
+		tcnt.text_direction = Control.TEXT_DIRECTION_LTR
+		tcnt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tv.add_child(tcnt)
+		var badge := PanelContainer.new()
+		var bsb := StyleBoxFlat.new()
+		bsb.bg_color = Color(0.36, 0.84, 0.54)
+		bsb.set_corner_radius_all(10)
+		bsb.content_margin_left = 6
+		bsb.content_margin_right = 6
+		badge.add_theme_stylebox_override("panel", bsb)
+		badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		badge.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		badge.offset_left = -26
+		badge.offset_top = -6
+		badge.offset_right = 4
+		var bl := Label.new()
+		bl.add_theme_font_override("font", GameData.font_bold)
+		bl.add_theme_font_size_override("font_size", 15)
+		bl.add_theme_color_override("font_color", Color(0.05, 0.23, 0.12))
+		bl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		badge.add_child(bl)
+		tb.add_child(badge)
+		upg_tabs_btn[t] = {"button": tb, "count": tcnt, "badge": badge, "badge_label": bl}
+
+		# --- карточка шара (видна только у открытой вкладки)
 		var card := PanelContainer.new()
 		card.theme_type_variation = "Card"
+		card.visible = t == upg_type
 		shop_box.add_child(card)
 		var cv := VBoxContainer.new()
-		cv.add_theme_constant_override("separation", 10)
+		cv.add_theme_constant_override("separation", 8)
 		card.add_child(cv)
-		var extra := _card_head(cv, t, not unlocked)
+		var stat := _card_head(cv, t, not unlocked)
+		# описание — в одну строку, полный текст по «i»
+		var dr := HBoxContainer.new()
+		dr.add_theme_constant_override("separation", 6)
+		cv.add_child(dr)
 		var sd := _label(tr(def["desc"]), "Muted")
-		sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		cv.add_child(sd)
-		var fl := _label("", "Muted")
-		fl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		fl.add_theme_color_override("font_color", def["color"].lerp(Color.WHITE, 0.35))
-		cv.add_child(fl)
+		sd.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if unlocked:
+			sd.clip_text = true
+			sd.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			var ib := _button("i", "", 40)
+			ib.custom_minimum_size.x = 40
+			ib.toggle_mode = true
+			ib.toggled.connect(func(on):
+				sd.clip_text = not on
+				sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if on else TextServer.AUTOWRAP_OFF)
+			dr.add_child(sd)
+			dr.add_child(ib)
+		else:
+			sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			dr.add_child(sd)
+		if unlocked:
+			# бонус стаи — полоской: ступень, прогресс до следующей, что даёт сейчас
+			var fr := HBoxContainer.new()
+			fr.add_theme_constant_override("separation", 8)
+			cv.add_child(fr)
+			var fcol: Color = def["color"].lerp(Color.WHITE, 0.35)
+			var fl := _label("", "Muted")
+			fl.add_theme_color_override("font_color", fcol)
+			fr.add_child(fl)
+			var fb := ProgressBar.new()
+			fb.show_percentage = false
+			fb.max_value = 1.0
+			fb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			fb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			fb.custom_minimum_size.y = 10
+			var fbg := StyleBoxFlat.new()
+			fbg.bg_color = Color(0, 0, 0, 0.35)
+			fbg.set_corner_radius_all(5)
+			var ffg := StyleBoxFlat.new()
+			ffg.bg_color = fcol
+			ffg.set_corner_radius_all(5)
+			fb.add_theme_stylebox_override("background", fbg)
+			fb.add_theme_stylebox_override("fill", ffg)
+			fr.add_child(fb)
+			var fe := _label("", "Muted")
+			fr.add_child(fe)
 			var trs := {}
 			for tr_ in def["tracks"]:
-				var row := HBoxContainer.new()
-				row.add_theme_constant_override("separation", 10)
-				cv.add_child(row)
-				var cap := _label("", "")
-				cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-				cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-				row.add_child(cap)
-				var bt := _button("", "", 62, ic_coin)
-				bt.custom_minimum_size.x = 170
-				bt.pressed.connect(_buy_track.bind(t, tr_["id"]))
-				row.add_child(bt)
-				trs[tr_["id"]] = {"label": cap, "button": bt}
-			var stat := _label("", "Muted")
-			stat.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			stat.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
-			cv.add_child(stat)
-			cv.move_child(stat, fl.get_index() + 1)
-			shop_refs[t] = {"extra": extra, "fleet": fl, "tracks": trs, "stat": stat}
+				trs[tr_["id"]] = _upg_row(cv, tr(TRACK_NAMES.get(tr_["id"], tr_["id"])), ic_coin, _buy_track.bind(t, tr_["id"]))
+			shop_refs[t] = {"card": card, "fleet": fl, "fleet_bar": fb, "fleet_eff": fe, "tracks": trs, "stat": stat}
 			_build_evo_section(cv, t)
 		else:
-			card.modulate = Color(1, 1, 1, 0.75)
 			var ub := _button(tr("Открыть · 1 U"), "AccentButton", 62, ic_gem)
 			ub.pressed.connect(_unlock_type.bind(t))
 			cv.add_child(ub)
-			shop_refs[t] = {"extra": extra, "fleet": fl, "unlock": ub}
+			shop_refs[t] = {"card": card, "unlock": ub, "stat": stat}
 	_refresh_ui()
 
 
-## Эволюции шара — в его же карточке, под прокачкой за монеты: две эволюции за U,
-## у купленной — две бесконечные ветки со значениями «сейчас → после покупки».
+## «8.3 кл/с → 9.9 кл/с» → «8.3 → 9.9 кл/с»: одинаковая единица — только в конце.
+static func _arrow(a: String, b: String) -> String:
+	var i := a.length()
+	while i > 0 and not a[i - 1].is_valid_int():
+		i -= 1
+	var unit := a.substr(i)
+	if unit.strip_edges() != "" and b.ends_with(unit) and i > 0:
+		return "%s → %s" % [a.substr(0, i), b]
+	return "%s → %s" % [a, b]
+
+
+## Строка улучшения: название, значение «сейчас → после» и кнопка цены (монеты или U) — одна строка.
+func _upg_row(parent: VBoxContainer, name: String, icon: Texture2D, cb: Callable) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	parent.add_child(row)
+	var nl := _label(name, "")
+	row.add_child(nl)
+	var vl := _label("", "Muted")
+	vl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.add_child(vl)
+	var bt := _button("", "", 56, icon)
+	bt.custom_minimum_size.x = 132
+	bt.pressed.connect(cb)
+	row.add_child(bt)
+	return {"label": vl, "button": bt, "name": nl}
+
+
+## Эволюции шара — в его же карточке, под прокачкой за монеты. Купленная: заголовок с ✓ и строки веток
+## (значение и кнопка ◆), некупленная: название, короткое описание и кнопка ◆ цены.
 func _build_evo_section(cv: VBoxContainer, t: String) -> void:
 	var sep := HSeparator.new()
 	sep.modulate = Color(1, 1, 1, 0.35)
@@ -3581,37 +3691,79 @@ func _build_evo_section(cv: VBoxContainer, t: String) -> void:
 	var refs := {}
 	for e in GameData.EVOS[t]:
 		var eid: String = e["id"]
-		var ev_box := VBoxContainer.new()
-		ev_box.add_theme_constant_override("separation", 6)
-		cv.add_child(ev_box)
-		var nm := _label(tr(e["name"]), "")
-		nm.add_theme_font_override("font", GameData.font_bold)
-		ev_box.add_child(nm)
-		var ds := _label(tr(e["desc"]), "Muted")
-		ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		ev_box.add_child(ds)
 		if not _has_evo(t, eid):
-			var bb := _button("", "AccentButton", 58, ic_gem)
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 8)
+			cv.add_child(row)
+			var tv := VBoxContainer.new()
+			tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			tv.add_theme_constant_override("separation", 2)
+			row.add_child(tv)
+			var nm := _label(tr(e["name"]), "")
+			nm.add_theme_font_override("font", GameData.font_bold)
+			tv.add_child(nm)
+			var ds := _label(tr(e["desc"]), "Muted")
+			ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			tv.add_child(ds)
+			var bb := _button("", "", 56, ic_gem)
+			bb.custom_minimum_size.x = 132
+			bb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			bb.pressed.connect(_buy_evo.bind(t, eid))
-			ev_box.add_child(bb)
+			row.add_child(bb)
 			refs[eid] = {"buy": bb}
 			continue
+		var nm2 := _label(tr(e["name"]) + "  ✓", "")
+		nm2.add_theme_font_override("font", GameData.font_bold)
+		nm2.add_theme_color_override("font_color", Color(0.55, 0.9, 0.65))
+		cv.add_child(nm2)
 		var ladders := {}
 		for tr_ in e["tracks"]:
-			var row := HBoxContainer.new()
-			row.add_theme_constant_override("separation", 10)
-			ev_box.add_child(row)
-			var cap := _label("", "")
-			cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			row.add_child(cap)
-			var lb := _button("", "", 58, ic_gem)
-			lb.custom_minimum_size.x = 130
-			lb.pressed.connect(_buy_ladder.bind(t, tr_["id"]))
-			row.add_child(lb)
-			ladders[tr_["id"]] = {"label": cap, "button": lb}
+			ladders[tr_["id"]] = _upg_row(cv, tr(tr_["name"]), ic_gem, _buy_ladder.bind(t, tr_["id"]))
 		refs[eid] = {"ladders": ladders}
 	evo_refs[t] = refs
+
+
+## Открыть вкладку шара в прокачке: видна только его карточка, прокрутка — к началу.
+func _open_upg_tab(t: String) -> void:
+	upg_type = t
+	for tp in shop_refs:
+		shop_refs[tp]["card"].visible = tp == t
+	for tp in upg_tabs_btn:
+		upg_tabs_btn[tp]["button"].set_pressed_no_signal(tp == t)   # программно группа не снимает прежнюю
+	if upg_scroll != null:
+		upg_scroll.scroll_vertical = 0
+
+
+## Сколько улучшений шара можно купить прямо сейчас (для зелёного счётчика на вкладке).
+func _affordable(t: String) -> int:
+	if not unl[t]:
+		return 1 if run_u >= 1 else 0
+	var n := 0
+	for d in GameData.TYPES[t]["tracks"]:
+		if not _track_maxed(t, d["id"]) and coins >= _track_cost(t, d["id"]):
+			n += 1
+	for e in GameData.EVOS[t]:
+		if not _has_evo(t, e["id"]):
+			if run_u >= _evo_cost(t):
+				n += 1
+		else:
+			for trk in e["tracks"]:
+				if not _ladder_maxed(t, trk["id"]) and run_u >= _ladder_cost(t, trk["id"]):
+					n += 1
+	return n
+
+
+## Бонус стаи: ступень k из 9, прогресс до следующей (0..1) и что даёт сейчас.
+func _fleet_parts(t: String) -> Array:
+	var f: String = GameData.TYPES[t]["fleet"]
+	var n := int(counts[t])
+	var k := GameData.fleet_steps(n)
+	var val := k if f == "flat" else 5 * k
+	var prev: int = 0 if k == 0 else int(GameData.FLEET_STEPS[k - 1])
+	var frac := 1.0
+	if k < GameData.FLEET_STEPS.size():
+		frac = clampf(float(n - prev) / float(int(GameData.FLEET_STEPS[k]) - prev), 0.0, 1.0)
+	return [k, frac, tr(GameData.FLEET_DESC[f]) % val]
 
 
 # ---------------------------------------------------------------- значения с единицами
@@ -3762,20 +3914,30 @@ func _refresh_ui() -> void:
 	upg_u.text = str(run_u)
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
-		r["extra"].text = tr("шаров на карте: %d") % (int(counts[t]) + int(extra[t]))
-		if r.has("stat"):
-			r["stat"].text = tr("Нанесено урона: %s · %s/с за 10 с") % [GameData.fmt(dmg_total[t]), _num(snappedf(_dps(t), 0.1)) if _dps(t) < 100.0 else GameData.fmt(int(_dps(t)))]
-		r["fleet"].text = _fleet_text(t)
+		if upg_tabs_btn.has(t):
+			var tbr: Dictionary = upg_tabs_btn[t]
+			tbr["count"].text = ("×%d" % (int(counts[t]) + int(extra[t]))) if unl[t] else "1 U"
+			var af := _affordable(t)
+			tbr["badge"].visible = af > 0
+			tbr["badge_label"].text = str(af)
 		if r.has("unlock"):
 			r["unlock"].disabled = run_u < 1
 			continue
+		var dps := _dps(t)
+		r["stat"].text = "%s · %s" % [GameData.fmt(dmg_total[t]), _u_rate(_num(snappedf(dps, 0.1)) if dps < 100.0 else GameData.fmt(int(dps)))]
+		var fp := _fleet_parts(t)
+		r["fleet"].text = tr("Стая %d/9") % fp[0]
+		r["fleet_bar"].value = fp[1]
+		r["fleet_eff"].text = fp[2]
 		for id in r["tracks"]:
 			var cost := _track_cost(t, id)
-			r["tracks"][id]["label"].text = _track_caption(t, id)
+			var lv := _tl(t, id)
 			if _track_maxed(t, id):
+				r["tracks"][id]["label"].text = "%s (%s)" % [_track_text(t, id, lv), tr("макс.")]
 				r["tracks"][id]["button"].text = tr("макс.")
 				r["tracks"][id]["button"].disabled = true
 			else:
+				r["tracks"][id]["label"].text = _arrow(_track_text(t, id, lv), _track_text(t, id, lv + 1))
 				r["tracks"][id]["button"].text = GameData.fmt(cost)
 				r["tracks"][id]["button"].disabled = coins < cost
 	for t in evo_refs:
@@ -3783,12 +3945,14 @@ func _refresh_ui() -> void:
 			var er: Dictionary = evo_refs[t][eid]
 			if er.has("buy"):
 				var ec := _evo_cost(t)
-				er["buy"].text = tr("Эволюция · %d") % ec
+				er["buy"].text = str(ec)
 				er["buy"].disabled = run_u < ec
 				continue
 			for trk in er["ladders"]:
 				var lr: Dictionary = er["ladders"][trk]
-				lr["label"].text = _ev_caption(t, trk)
+				var elv := _el(t, trk)
+				lr["label"].text = ("%s (%s)" % [_ev_text(t, trk, elv), tr("макс.")]) if _ladder_maxed(t, trk) \
+					else _arrow(_ev_text(t, trk, elv), _ev_text(t, trk, elv + 1))
 				if _ladder_maxed(t, trk):
 					lr["button"].text = tr("макс.")
 					lr["button"].disabled = true
@@ -3838,15 +4002,3 @@ func _track_caption(t: String, id: String) -> String:
 	if _track_maxed(t, id):
 		return "%s: %s (%s)" % [name, _track_text(t, id, lv), tr("макс.")]
 	return "%s: %s → %s" % [name, _track_text(t, id, lv), _track_text(t, id, lv + 1)]
-
-
-## Строка бонуса стаи: ступень, что даёт сейчас, сколько шаров до следующей.
-func _fleet_text(t: String) -> String:
-	var f: String = GameData.TYPES[t]["fleet"]
-	var n := int(counts[t])
-	var k := GameData.fleet_steps(n)
-	var val := k if f == "flat" else 5 * k
-	var txt := tr("Бонус стаи %d/9") % k + ": " + tr(GameData.FLEET_DESC[f]) % val
-	if k < GameData.FLEET_STEPS.size():
-		txt += " · " + tr("до следующей ещё %d") % (GameData.FLEET_STEPS[k] - n)
-	return txt
