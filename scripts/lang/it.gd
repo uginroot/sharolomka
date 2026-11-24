@@ -31,7 +31,6 @@ const T := {
 	"Прокачка": "Potenziamenti",
 	"любой": "libero",
 	"45°": "45°",
-	"Разбито %d%%": "Rotto %d%%",
 	"Разбито %s": "Rotti %s",
 	"%s из %s": "%s di %s",
 	"Вернуться к игре": "Torna al gioco",

@@ -181,7 +181,12 @@ func _run() -> void:
 	check(chip.get_meta("cnt").text.begins_with("×") and chip.get_meta("price").text != "", "на фишке шара видны число и цена")
 	check(_find(get_tree().root, "Выстрел") == null, "кнопки «Выстрел» больше нет")
 
-	# сдвиг карты двумя пальцами двигает точку выстрела
+	# сдвиг карты двумя пальцами двигает точку выстрела.
+	# Камера — в центре открытой части: центр камеры ограничен ею, и если камера уже стояла у края в сторону
+	# сдвига, двигаться было некуда — проверка «плавала» в зависимости от того, как пролетели шары.
+	g.cam.position = g._explored_rect().get_center()
+	g._clamp_cam()
+	await get_tree().process_frame
 	var c0: Vector2 = g.cam.position
 	await _two_fingers(0.0, Vector2(0, 250))
 	check(g.cam.position.distance_to(c0) > 20.0, "два пальца двигают карту")

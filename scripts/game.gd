@@ -3052,6 +3052,8 @@ func _build_ui() -> void:
 	tr.add_child(pv)
 	lbl_prog = _label("", "Muted")
 	lbl_prog.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_prog.clip_text = true   # подпись не раздвигает верхнюю панель (тест проверяет, что помещается целиком)
+	lbl_prog.custom_minimum_size.x = 0
 	pv.add_child(lbl_prog)
 	prog_bar = ProgressBar.new()
 	prog_bar.show_percentage = false
@@ -3510,6 +3512,14 @@ func _ev_caption(t: String, track: String) -> String:
 	return "%s: %s → %s" % [name, _ev_text(t, track, lv), _ev_text(t, track, lv + 1)]
 
 
+## Процент прогресса: вниз (100% — только при полной расчистке), до 10% — с одним знаком.
+static func _pct_text(frac: float) -> String:
+	var p := frac * 100.0
+	if p < 10.0:
+		return "%.1f%%" % (floorf(p * 10.0) / 10.0)
+	return "%d%%" % int(floorf(p))
+
+
 func _refresh_ui() -> void:
 	if lbl_rub == null:
 		return
@@ -3517,12 +3527,11 @@ func _refresh_ui() -> void:
 	lbl_u.text = str(run_u)
 	var frac := float(destroyed) / maxf(1.0, float(goal))
 	prog_bar.value = minf(1.0, frac)
-	if track_all:
-		lbl_prog.text = tr("Разбито %d%%") % int(100.0 * frac)
-	elif goal_done:
-		lbl_prog.text = tr("Разбито %s") % GameData.fmt(destroyed)
+	# числа и проценты: «1.2K из 18.2K · 7%»; после цели на больших картах — «Разбито 350K · 117%» (от цели)
+	if goal_done and not track_all:
+		lbl_prog.text = tr("Разбито %s") % GameData.fmt(destroyed) + " · " + _pct_text(frac)
 	else:
-		lbl_prog.text = tr("%s из %s") % [GameData.fmt(destroyed), GameData.fmt(goal)]
+		lbl_prog.text = tr("%s из %s") % [GameData.fmt(destroyed), GameData.fmt(goal)] + " · " + _pct_text(frac)
 	btn_snap.text = [tr("любой"), tr("45°"), tr("ключевые")][snap_mode]
 	if frenzy_t > 0.0:
 		frenzy_label.text = tr("Урон ×2 · %d с") % int(ceil(frenzy_t))

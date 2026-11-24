@@ -31,7 +31,6 @@ const T := {
 	"Прокачка": "Upgrades",
 	"любой": "frei",
 	"45°": "45°",
-	"Разбито %d%%": "Zerstört %d%%",
 	"Разбито %s": "Zerstört %s",
 	"%s из %s": "%s von %s",
 	"Вернуться к игре": "Zurück zum Spiel",

@@ -1889,3 +1889,33 @@ func test_top_bar_stable() -> void:
 				check(now[k].is_equal_approx(ref[k]), "%s, монеты %s, U %d: блок %d сдвинулся %s → %s" % [code, GameData.fmt(g.coins), g.run_u, k, str(ref[k]), str(now[k])])
 	GameData.lang_choice = "ru"
 	GameData.apply_settings()
+
+
+
+## Прогресс: числа и проценты; процент вниз (100% — только при полной расчистке); подпись помещается целиком.
+func test_progress_label() -> void:
+	var gg = GAME.instantiate()
+	check(gg._pct_text(0.004) == "0.4%", "0.4%")
+	check(gg._pct_text(0.0999) == "9.9%" and gg._pct_text(0.5) == "50%" and gg._pct_text(0.9999) == "99%" and gg._pct_text(1.0) == "100%",
+		"проценты: %s %s %s %s" % [gg._pct_text(0.0999), gg._pct_text(0.5), gg._pct_text(0.9999), gg._pct_text(1.0)])
+	gg.free()
+	var g = await new_game(2)
+	g.destroyed = 1234
+	g._refresh_ui()
+	check(g.lbl_prog.text.begins_with("1.2K из ") and g.lbl_prog.text.ends_with("%"), "подпись малой карты: %s" % g.lbl_prog.text)
+	var g2 = await new_game(4)
+	var font: Font = g2.lbl_prog.get_theme_font("font")
+	var fsz: int = g2.lbl_prog.get_theme_font_size("font_size")
+	for code in ["ru", "de", "fr", "vi", "id"]:
+		GameData.lang_choice = code
+		GameData.apply_settings()
+		for st in [[123456, false], [79999, false], [350000, true]]:
+			g2.destroyed = st[0]
+			g2.goal_done = st[1]
+			g2._refresh_ui()
+			await get_tree().process_frame
+			var need: float = font.get_string_size(g2.lbl_prog.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
+			check(need <= g2.lbl_prog.size.x + 0.5, "%s: подпись прогресса не помещается: «%s» (%.0f > %.0f)" % [code, g2.lbl_prog.text, need, g2.lbl_prog.size.x])
+	check(g2.lbl_prog.text.ends_with("437%") or "%" in g2.lbl_prog.text, "после цели нет процента: %s" % g2.lbl_prog.text)
+	GameData.lang_choice = "ru"
+	GameData.apply_settings()
