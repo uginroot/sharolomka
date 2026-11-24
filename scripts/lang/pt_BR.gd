@@ -185,4 +185,5 @@ const T := {
 	"Пройдено за %s": "Concluído em %s",
 	"лучшее %s": "melhor %s",
 	"сейчас %s": "agora %s",
+	"Нанесено урона: %s · %s/с за 10 с": "Dano causado: %s · %s/s em 10 s",
 }

@@ -1764,3 +1764,50 @@ func test_map_stats() -> void:
 	check(lbl != null and "17:32" in lbl.text and "15:00" in lbl.text, "в меню нет статистики: %s" % (lbl.text if lbl else "—"))
 	menu.queue_free()
 	GameData.reset_all()
+
+
+
+## Статистика шаров уровня: весь урон по типу и среднее в секунду за последние 10 с; сохраняется с уровнем.
+func test_ball_damage_stats() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	g.balls.clear()
+	g._spawn_ball("splash", 0.0, g.start_pos)
+	g._spawn_ball("basic", 0.0, g.start_pos)
+	var rb = g.balls[0]
+	var bb = g.balls[1]
+	var id := -1
+	for y in g.H:
+		for x in g.W:
+			if id < 0 and g._kind_at(x, y) == 1 and g._hp_of(y * g.W + x) >= 100:
+				id = y * g.W + x
+	check(id >= 0, "нет квадрата со 100+ жизнями")
+	g.time_acc = 100.0
+	g._damage(id, 30, rb)
+	g._damage(id, 10, bb)
+	check(g.dmg_total["splash"] == 30 and g.dmg_total["basic"] == 10, "урон не засчитан типам: %s" % str(g.dmg_total))
+	check(is_equal_approx(g._dps("splash"), 3.0), "среднее за 10 с: %.2f, а не 3" % g._dps("splash"))
+	g.time_acc = 105.5
+	g._damage(id, 20, rb)
+	check(is_equal_approx(g._dps("splash"), 5.0), "среднее за 10 с после второго удара: %.2f" % g._dps("splash"))
+	g.time_acc = 111.2   # первая секунда (100) выпала из окна
+	check(is_equal_approx(g._dps("splash"), 2.0), "устаревший урон не выпал из окна: %.2f" % g._dps("splash"))
+	g.time_acc = 130.0
+	check(g._dps("splash") == 0.0 and g.dmg_total["splash"] == 50, "окно не обнулилось или потерян итог")
+	# яд засчитывается Антониевому
+	g._spawn_ball("poison", 0.0, g.start_pos)
+	g._apply_poison(id, 3, g.balls[-1])
+	for k in 40:
+		g._sim(0.1)
+	check(g.dmg_total["poison"] > 0, "урон яда не засчитан Антониевому")
+	# строка в карточке и сохранение
+	g._show_upgrades(true)
+	g._refresh_ui()
+	var total: int = g.dmg_total["splash"]   # шары продолжали летать, пока шёл яд, — урон мог вырасти
+	check(("Нанесено урона: %s" % GameData.fmt(total)) in g.shop_refs["splash"]["stat"].text, "строка статистики: %s" % g.shop_refs["splash"]["stat"].text)
+	g._save_state()
+	game.queue_free()
+	game = null
+	await get_tree().process_frame
+	game = GAME.instantiate()
+	add_child(game)
+	check(game.dmg_total["splash"] == total, "итог урона не сохранился с уровнем: %d ≠ %d" % [game.dmg_total["splash"], total])

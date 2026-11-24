@@ -65,6 +65,10 @@ var run_u := 0                   # U-баллы этого уровня — тр
 var u_ppm := 0                   # шанс U-балла в квадрате на миллион
 var gold_rate := GOLD_RATE       # шанс золотого квадрата на 10 000 (+ «Наследие»)
 var frenzy_time := FRENZY_TIME
+var dmg_total := {}              # статистика шаров уровня: тип → весь нанесённый урон
+var dmg_win := {}                # тип → урон по секундам за последние 10 с (кольцо из 10 корзин)
+var dmg_sec := 0                 # секунда игрового времени, до которой корзины актуальны
+const DPS_WINDOW := 10
 var play_time := 0.0             # сколько игрок играет этот уровень (только пока игра открыта), с
 var coin_acc := 0.0              # дробная часть монет при бонусе
 var coin_mult := 1.0
@@ -207,6 +211,10 @@ func _ready() -> void:
 		t_idx[t] = ti
 		counts[t] = 0
 		tlvl[t] = {}
+		dmg_total[t] = 0
+		var wb := PackedFloat32Array()
+		wb.resize(DPS_WINDOW)
+		dmg_win[t] = wb
 		evo[t] = {}
 		elvl[t] = {}
 		extra[t] = 0
@@ -1055,6 +1063,9 @@ func _load_state() -> float:
 		counts["basic"] = 1
 	run_u = int(s.get("u", 0))
 	play_time = maxf(0.0, float(s.get("time", 0.0)))
+	var dt_saved: Dictionary = s.get("dmg_total", {})
+	for t in GameData.TYPE_ORDER:
+		dmg_total[t] = maxi(0, int(dt_saved.get(t, 0)))
 	saved_balls = s.get("balls", [])
 	var ll: Array = s.get("last_launch", [])
 	if ll.size() == 2:
@@ -1099,6 +1110,7 @@ func _save_state() -> void:
 		"ver": 7, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
 		"counts": counts.duplicate(), "tracks": tlvl.duplicate(true), "unl": unl.duplicate(),
 		"evo": evo.duplicate(true), "elvl": elvl.duplicate(true), "extra": extra.duplicate(), "time": play_time,
+		"dmg_total": dmg_total.duplicate(),
 		"saved_at": Time.get_unix_time_from_system(), "chunks": out,
 		"balls": balls.map(func(b): return [b.type, b.pos.x, b.pos.y, b.vel.x, b.vel.y]),
 		"last_launch": [last_launch.x, last_launch.y], "aim": aim_angle, "selected": selected,
@@ -1849,6 +1861,42 @@ func _gravity_target(b) -> Vector2:
 	return tc if _clear_line(b.pos, tc) else Vector2(-1, -1)
 
 
+## Статистика шаров: весь урон типа за уровень и урон по секундам за последние DPS_WINDOW секунд.
+func _count_damage(t: String, dealt: int) -> void:
+	_advance_dps()
+	dmg_total[t] = int(dmg_total[t]) + dealt
+	var wb: PackedFloat32Array = dmg_win[t]
+	wb[dmg_sec % DPS_WINDOW] += dealt
+	dmg_win[t] = wb
+
+
+## Сдвигает кольцо корзин до текущей секунды: устаревшие секунды обнуляются.
+func _advance_dps() -> void:
+	var cur := int(time_acc)
+	if cur - dmg_sec >= DPS_WINDOW:
+		for t in dmg_win:
+			var z := PackedFloat32Array()
+			z.resize(DPS_WINDOW)
+			dmg_win[t] = z
+		dmg_sec = cur
+		return
+	while dmg_sec < cur:
+		dmg_sec += 1
+		for t in dmg_win:
+			var wb: PackedFloat32Array = dmg_win[t]
+			wb[dmg_sec % DPS_WINDOW] = 0.0
+			dmg_win[t] = wb
+
+
+## Средний урон в секунду за последние 10 с (в начале уровня — за прошедшее время).
+func _dps(t: String) -> float:
+	_advance_dps()
+	var sum := 0.0
+	for v in dmg_win[t]:
+		sum += v
+	return sum / clampf(time_acc, 1.0, float(DPS_WINDOW))
+
+
 ## Удар по открытым разрушаемым клеткам вокруг (радиус по Чебышёву), каждой — доля силы.
 func _smash(id: int, amount: float, rad: int, b) -> void:
 	var cx := id % W
@@ -1903,6 +1951,7 @@ func _damage(id: int, amount: int, b) -> void:
 	coins += add
 	if b != null:
 		b.earned += dealt
+		_count_damage(b.type, dealt)
 	_mark(ck)
 	if h - dealt <= 0:
 		Sfx.play("break", 0.12)
@@ -3321,7 +3370,12 @@ func _rebuild_rows() -> void:
 				bt.pressed.connect(_buy_track.bind(t, tr_["id"]))
 				row.add_child(bt)
 				trs[tr_["id"]] = {"label": cap, "button": bt}
-			shop_refs[t] = {"extra": extra, "fleet": fl, "tracks": trs}
+			var stat := _label("", "Muted")
+			stat.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			stat.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+			cv.add_child(stat)
+			cv.move_child(stat, fl.get_index() + 1)
+			shop_refs[t] = {"extra": extra, "fleet": fl, "tracks": trs, "stat": stat}
 			_build_evo_section(cv, t)
 		else:
 			card.modulate = Color(1, 1, 1, 0.75)
@@ -3486,6 +3540,8 @@ func _refresh_ui() -> void:
 	for t in shop_refs:
 		var r: Dictionary = shop_refs[t]
 		r["extra"].text = tr("шаров на карте: %d") % (int(counts[t]) + int(extra[t]))
+		if r.has("stat"):
+			r["stat"].text = tr("Нанесено урона: %s · %s/с за 10 с") % [GameData.fmt(dmg_total[t]), _num(snappedf(_dps(t), 0.1)) if _dps(t) < 100.0 else GameData.fmt(int(_dps(t)))]
 		r["fleet"].text = _fleet_text(t)
 		if r.has("unlock"):
 			r["unlock"].disabled = run_u < 1
