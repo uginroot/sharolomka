@@ -47,8 +47,6 @@ const T := {
 	"Нажмите на открытую клетку": "Ketuk petak yang terbuka",
 	"Отпустите — перезапуск бездельника": "Lepaskan untuk meluncurkan ulang bola malas",
 	"Не хватает монет": "Koin tidak cukup",
-	"Сброс: прицельтесь": "Ulang: bidik",
-	"Сброс · %d с": "Ulang · %d dtk",
 	"Финал: осталось %d — шары летят к последним квадратам": "Final: tersisa %d — bola terbang ke kotak terakhir",
 	"Урон ×2 · %d с": "Kerusakan ×2 · %d dtk",
 	"Пустыня": "Gurun",
@@ -185,4 +183,5 @@ const T := {
 	"лучшее %s": "terbaik %s",
 	"сейчас %s": "sekarang %s",
 	"Нанесено урона: %s · %s/с за 10 с": "Kerusakan: %s · %s/dtk selama 10 dtk",
+	"Вернуть шар": "Tarik bola",
 }

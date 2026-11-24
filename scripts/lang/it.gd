@@ -47,8 +47,6 @@ const T := {
 	"Нажмите на открытую клетку": "Tocca una casella aperta",
 	"Отпустите — перезапуск бездельника": "Rilascia per rilanciare la pallina pigra",
 	"Не хватает монет": "Monete insufficienti",
-	"Сброс: прицельтесь": "Rilancio: mira",
-	"Сброс · %d с": "Rilancio · %d s",
 	"Финал: осталось %d — шары летят к последним квадратам": "Finale: ne restano %d — le palline volano verso gli ultimi quadrati",
 	"Урон ×2 · %d с": "Danno ×2 · %d s",
 	"Пустыня": "Deserto",
@@ -185,4 +183,5 @@ const T := {
 	"лучшее %s": "migliore %s",
 	"сейчас %s": "ora %s",
 	"Нанесено урона: %s · %s/с за 10 с": "Danni inflitti: %s · %s/s in 10 s",
+	"Вернуть шар": "Richiama pallina",
 }

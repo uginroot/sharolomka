@@ -47,8 +47,6 @@ const T := {
 	"Нажмите на открытую клетку": "Açık bir kareye dokun",
 	"Отпустите — перезапуск бездельника": "Tembel topu yeniden atmak için bırak",
 	"Не хватает монет": "Yeterli jeton yok",
-	"Сброс: прицельтесь": "Yeniden at: nişan al",
-	"Сброс · %d с": "Yeniden at · %d sn",
 	"Финал: осталось %d — шары летят к последним квадратам": "Final: %d kaldı — toplar son karelere uçuyor",
 	"Урон ×2 · %d с": "Hasar ×2 · %d sn",
 	"Пустыня": "Çöl",
@@ -185,4 +183,5 @@ const T := {
 	"лучшее %s": "en iyi %s",
 	"сейчас %s": "şimdi %s",
 	"Нанесено урона: %s · %s/с за 10 с": "Verilen hasar: %s · 10 sn'de %s/sn",
+	"Вернуть шар": "Topu geri al",
 }

@@ -531,7 +531,7 @@ func _cyrillic_texts(node: Node, out: Array) -> void:
 func test_russian_ui() -> void:
 	var g = await new_game(2)
 	check(tr("Прокачка") == "Прокачка", "в русском режиме перевод не русский: %s" % tr("Прокачка"))
-	check(g.btn_reset.text.begins_with("Сброс"), "кнопка сброса не на русском: %s" % g.btn_reset.text)
+	check(g.btn_reset.text == "Вернуть шар", "кнопка «Вернуть шар» не на русском: %s" % g.btn_reset.text)
 
 
 ## Нижняя панель не шире экрана, даже когда открыты все 5 типов и цены большие.
@@ -556,6 +556,7 @@ func test_bottom_bar_fits() -> void:
 	check(g.btn_snap.get_parent().get_parent().get_parent().get_parent() == g.bottom_bar, "выбор угла не внизу")
 	var top_row: HBoxContainer = g.lbl_rub.get_parent().get_parent().get_parent()
 	check(top_row.get_child(top_row.get_child_count() - 1) is Button, "кнопка меню не справа вверху")
+	var bar_h := -1.0
 	for code in ["ru", "de", "hi", "vi"]:
 		GameData.lang_choice = code
 		GameData.apply_settings()
@@ -579,15 +580,17 @@ func test_bottom_bar_fits() -> void:
 							covered = false
 					if not covered:
 						continue
-					var longest := 0.0
-					for word in bb.text.split(" "):
-						longest = maxf(longest, GameData.font.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x)
-					# реальное место под текст: ширина кнопки минус отступы стиля, значок и промежуток до текста
+					# надпись — целиком в одну строку (шрифт ужимается): высота кнопки не меняется
 					var sb: StyleBox = bb.get_theme_stylebox("normal")
 					var room: float = bb.size.x - sb.get_content_margin(SIDE_LEFT) - sb.get_content_margin(SIDE_RIGHT)
 					if bb.icon != null:
 						room -= float(bb.get_theme_constant("icon_max_width")) + float(bb.get_theme_constant("h_separation"))
-					check(longest <= room + 0.5, "%s: слово не влезает в кнопку «%s» (%.0f > %.0f)" % [code, bb.text, longest, room])
+					var need: float = GameData.font.get_string_size(bb.text, HORIZONTAL_ALIGNMENT_LEFT, -1, bb.get_theme_font_size("font_size")).x
+					check(need <= room + 0.5, "%s: надпись не помещается в одну строку: «%s» (%.0f > %.0f)" % [code, bb.text, need, room])
+				# высота нижней панели одна и та же во всех состояниях и на всех языках
+				if bar_h < 0.0:
+					bar_h = g.bottom_bar.size.y
+				check(is_equal_approx(g.bottom_bar.size.y, bar_h), "%s: нижняя панель прыгнула: %.0f → %.0f (режим %d, включён %s)" % [code, bar_h, g.bottom_bar.size.y, mode, armed])
 	g.reset_armed = false
 	GameData.lang_choice = "ru"
 	GameData.apply_settings()
@@ -2026,3 +2029,27 @@ func test_ball_markers() -> void:
 	for k in 15:
 		g._sim(0.1)
 	check(g.highlight_t == 0.0, "подсветка не погасла")
+
+
+
+## «Вернуть шар»: надпись постоянная, состояние — оформлением; перезарядка заполняет фон; виден шар, который вернётся.
+func test_recall_button() -> void:
+	var g = await new_game(2)
+	g.coins = 100000
+	g._fire(g.start_pos)
+	g._fire(g.start_pos)
+	g._refresh_ui()
+	var t0: String = g.btn_reset.text
+	var h0: float = g.btn_reset.size.y
+	g._reset_stuck()
+	g._refresh_ui()
+	await get_tree().process_frame
+	check(g.reset_armed and g.btn_reset.text == t0 and g.btn_reset.theme_type_variation == "AccentButton", "включённый режим: текст «%s», стиль %s" % [g.btn_reset.text, g.btn_reset.theme_type_variation])
+	check(is_equal_approx(g.btn_reset.size.y, h0), "кнопка изменила высоту при включении")
+	check(g._idler("basic") != null, "нет шара, который вернётся")
+	g.reset_armed = false
+	g.reset_cd["basic"] = 15.0
+	g._refresh_ui()
+	await get_tree().process_frame
+	check(g.btn_reset.text == t0 and g.btn_reset.disabled, "перезарядка: текст «%s», disabled=%s" % [g.btn_reset.text, g.btn_reset.disabled])
+	check(is_equal_approx(g.btn_reset.size.y, h0), "кнопка изменила высоту при перезарядке")

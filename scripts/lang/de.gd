@@ -47,8 +47,6 @@ const T := {
 	"Нажмите на открытую клетку": "Tippe auf ein offenes Feld",
 	"Отпустите — перезапуск бездельника": "Loslassen, um die faule Kugel neu zu starten",
 	"Не хватает монет": "Nicht genug Münzen",
-	"Сброс: прицельтесь": "Neustart: zielen",
-	"Сброс · %d с": "Neustart · %d s",
 	"Финал: осталось %d — шары летят к последним квадратам": "Finale: noch %d — die Kugeln fliegen zu den letzten Quadraten",
 	"Урон ×2 · %d с": "Schaden ×2 · %d s",
 	"Пустыня": "Wüste",
@@ -185,4 +183,5 @@ const T := {
 	"лучшее %s": "Bestzeit %s",
 	"сейчас %s": "jetzt %s",
 	"Нанесено урона: %s · %s/с за 10 с": "Verursachter Schaden: %s · %s/s über 10 s",
+	"Вернуть шар": "Ball zurückholen",
 }

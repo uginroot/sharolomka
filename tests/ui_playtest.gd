@@ -260,7 +260,7 @@ func _run() -> void:
 	# сброс: включить, выстрелить рогаткой — перезапускается бездельник, новый шар не покупается
 	g._select("basic")
 	await _wait(0.2)
-	check(await _tap("Сброс"), "кнопка «Сброс» нажимается")
+	check(await _tap("Вернуть шар"), "кнопка «Вернуть шар» нажимается")
 	check(g.reset_armed, "сброс включил режим перезапуска")
 	var n_reset: int = g.balls.size()
 	var r_reset: int = g.coins

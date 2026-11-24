@@ -185,6 +185,8 @@ var chips_box: HBoxContainer
 var chip_group := ButtonGroup.new()
 var chips := {}
 var btn_reset: Button
+var reset_fill: Control
+const ROW_FONT := 23
 var upg: Control
 var upg_margin: MarginContainer
 var upg_rub: Label
@@ -2215,6 +2217,9 @@ func _draw_balls() -> void:
 	var acol: Color = colors["banner"]
 	acol.a = 0.35
 	var hl := highlight_t > 0.0
+	# «Вернуть шар» включён — пульсирует шар, который вернётся (бездельник выбранного типа)
+	var idle_b = _idler(selected) if reset_armed else null
+	var pulse := 0.5 + 0.5 * sin(time_acc * 7.0)
 	var hcol := Color(1, 1, 1, clampf(highlight_t / HIGHLIGHT_TIME, 0.0, 1.0))
 	for b in balls:
 		var dd: float = maxf(b.radius * 2.6, min_d)
@@ -2233,6 +2238,8 @@ func _draw_balls() -> void:
 				ball_layer.draw_line(b.pos + back * dd * 0.45 - side, b.pos + back * dd * 1.2 - side, c2, dd * 0.2)
 		var big := dd * Icons.BALL_K
 		ball_layer.draw_texture_rect(ball_icons[b.type], Rect2(b.pos.x - big * 0.5, b.pos.y - big * 0.5, big, big), false)
+		if b == idle_b:
+			ball_layer.draw_arc(b.pos, dd * (0.9 + 0.35 * pulse), 0.0, TAU, 28, Color(0.45, 0.85, 1.0, 0.95 - 0.5 * pulse), maxf(2.0, 3.5 / zoom))
 		if hl and b.type == highlight_type:
 			ball_layer.draw_arc(b.pos, dd * 0.85, 0.0, TAU, 24, hcol, maxf(2.0, 3.0 / zoom))
 		if b.type == "banner" and lod == 0:
@@ -3125,21 +3132,29 @@ func _build_ui() -> void:
 	var br := HBoxContainer.new()
 	br.add_theme_constant_override("separation", 10)
 	bv.add_child(br)
-	# нижний ряд: прокачка, угол, сброс (длинные надписи переносятся, а не вылезают)
+	# нижний ряд: прокачка, угол, «Вернуть шар». Надписи всегда в одну строку (шрифт ужимается под ширину),
+	# высота ряда постоянна — интерфейс не прыгает при смене состояний
 	var bup := _button(tr("Прокачка"), "AccentButton", 64, Icons.arrow_up(40))
 	bup.pressed.connect(_show_upgrades.bind(true))
 	btn_snap = _button("", "", 64, Icons.angle(40))
 	btn_snap.pressed.connect(_cycle_snap)
 	ic_refresh = Icons.refresh(40)
-	btn_reset = _button("", "ChipButton", 64, ic_refresh)
+	btn_reset = _button(tr("Вернуть шар"), "ChipButton", 64, ic_refresh)
 	btn_reset.toggle_mode = true
 	btn_reset.pressed.connect(_reset_stuck)
+	# перезарядка «Вернуть шар»: фон кнопки заполняется слева направо
+	reset_fill = Control.new()
+	reset_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	reset_fill.set_anchors_preset(Control.PRESET_FULL_RECT)
+	reset_fill.draw.connect(_draw_reset_fill)
+	btn_reset.add_child(reset_fill)
 	for bb in [bup, btn_snap, btn_reset]:
 		bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		bb.custom_minimum_size.x = 0
-		bb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		bb.add_theme_font_size_override("font_size", 23)
+		bb.autowrap_mode = TextServer.AUTOWRAP_OFF
+		bb.clip_text = true
 		br.add_child(bb)
+		bb.resized.connect(_fit_button_text.bind(bb))
 	bottom_bar.resized.connect(_on_bars_resized)
 
 	# --- полоска «золотой лихорадки» под верхней панелью: убывает, поверх — надпись с таймером.
@@ -3559,6 +3574,38 @@ static func _pct_text(frac: float) -> String:
 	return "%d%%" % int(floorf(p))
 
 
+## Надпись кнопки нижнего ряда — всегда в одну строку: если не помещается, шрифт уменьшается (до 15).
+func _fit_button_text(bb: Button) -> void:
+	if bb.size.x <= 0.0:
+		return
+	var font: Font = bb.get_theme_font("font")
+	var sb: StyleBox = bb.get_theme_stylebox("normal")
+	var room := bb.size.x - sb.get_content_margin(SIDE_LEFT) - sb.get_content_margin(SIDE_RIGHT)
+	if bb.icon != null:
+		room -= float(bb.get_theme_constant("icon_max_width")) + float(bb.get_theme_constant("h_separation"))
+	var fs := ROW_FONT
+	while fs > 15 and font.get_string_size(bb.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > room:
+		fs -= 1
+	if bb.get_theme_font_size("font_size") != fs:
+		bb.add_theme_font_size_override("font_size", fs)
+
+
+## Перезарядка «Вернуть шар»: доля прошедшего времени — полупрозрачная заливка слева направо.
+func _draw_reset_fill() -> void:
+	var cd: float = reset_cd.get(selected, 0.0)
+	if cd <= 0.0 or reset_armed:
+		return
+	var done := clampf(1.0 - cd / RESET_CD, 0.0, 1.0)
+	var sz := reset_fill.size
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.45, 0.85, 1.0, 0.3)
+	var base := btn_reset.get_theme_stylebox("disabled")
+	var rad: int = base.corner_radius_top_left if base is StyleBoxFlat else 12
+	sb.set_corner_radius_all(rad)   # скругление как у кнопки — без торчащих прямых углов
+	if sz.x * done >= rad * 2.0:
+		reset_fill.draw_style_box(sb, Rect2(Vector2.ZERO, Vector2(sz.x * done, sz.y)))
+
+
 func _refresh_ui() -> void:
 	if lbl_rub == null:
 		return
@@ -3586,16 +3633,13 @@ func _refresh_ui() -> void:
 		chips[t].get_meta("price").text = GameData.fmt(price)
 		chips[t].modulate = Color(1, 1, 1, 1.0 if coins >= price else 0.6)
 	var cd: float = reset_cd[selected]
-	# в режиме «прицельтесь» значок скрыт — подсвеченная рамка уже показывает режим, а длинному тексту нужно место
-	btn_reset.icon = null if reset_armed else ic_refresh
-	if reset_armed:
-		btn_reset.text = tr("Сброс: прицельтесь")
-	elif cd > 0.0:
-		btn_reset.text = tr("Сброс · %d с") % int(ceil(cd))
-	else:
-		btn_reset.text = tr("Сброс")
+	# надпись не меняется — состояние показывает оформление: включено — акцентная заливка,
+	# перезарядка — фон заполняется слева направо (_draw_reset_fill)
+	btn_reset.theme_type_variation = "AccentButton" if reset_armed else "ChipButton"
 	btn_reset.set_pressed_no_signal(reset_armed)
 	btn_reset.disabled = not reset_armed and (cd > 0.0 or int(counts[selected]) == 0)
+	if reset_fill != null:
+		reset_fill.queue_redraw()
 
 	if not upg.visible:
 		return

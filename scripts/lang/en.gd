@@ -47,8 +47,6 @@ const T := {
 	"Нажмите на открытую клетку": "Press on an open cell",
 	"Отпустите — перезапуск бездельника": "Release to relaunch the idler",
 	"Не хватает монет": "Not enough coins",
-	"Сброс: прицельтесь": "Reset: take aim",
-	"Сброс · %d с": "Reset · %d s",
 	"Финал: осталось %d — шары летят к последним квадратам": "Finale: %d left — balls fly to the last squares",
 	"Урон ×2 · %d с": "Damage ×2 · %d s",
 	"Пустыня": "Desert",
@@ -185,4 +183,5 @@ const T := {
 	"лучшее %s": "best %s",
 	"сейчас %s": "now %s",
 	"Нанесено урона: %s · %s/с за 10 с": "Damage dealt: %s · %s/s over 10 s",
+	"Вернуть шар": "Recall ball",
 }
