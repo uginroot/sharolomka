@@ -124,6 +124,8 @@ var fog_builds := 0              # сколько раз пересчитыва�
 var frame_node: Node2D           # сетка в тумане и затемнение за картой (под кусками)
 var border_node: Node2D          # граница карты (над кусками)
 var _frame_key := Vector3.ZERO
+var has_shape := false          # карта-сцена с формой (овал, круг, скруглённый прямоугольник)
+var shape_pts := PackedVector2Array()
 var floor_col := FLOOR           # цвет пола — у бесконечных уровней свой по теме
 var hue_shift := 0.0             # сдвиг оттенка квадратов по теме
 var overlay: Node2D
@@ -229,6 +231,7 @@ func _ready() -> void:
 	hb = float(map["hp_base"])
 	hg = float(map["hp_growth"])
 	region_size = int(map.get("region", maxi(W, H)))
+	has_shape = map.has("shape")
 	track_all = W * H <= PREGEN_LIMIT
 	ex0 = start_cell.x
 	ex1 = start_cell.x
@@ -338,6 +341,8 @@ func _gen_chunk(ck: int, blob: Array):
 	var cx0 := (ck % cw) * CS
 	@warning_ignore("integer_division")
 	var cy0 := (ck / cw) * CS
+	c.ox = cx0
+	c.oy = cy0
 	var sc2 := START_CLEAR * START_CLEAR
 	var solid := 0
 	for ly in CS:
@@ -400,6 +405,298 @@ func _mask_at(x: int, y: int) -> int:
 	return reg["mask"][ly * reg["w"] + lx]
 
 
+# ---------------------------------------------------------------- карты-сцены (с v0.29)
+# Сцена — рисунок тонкими белыми линиями (как в pixel-rikoshet, но свои сюжеты): список штрихов в долях карты
+# (0..1 по ширине и высоте). Форма карты (овал, круг, скруглённый прямоугольник): снаружи — сплошная стена,
+# которая рисуется цветом фона за картой. Закрытые контуры получают проходы автоматически.
+
+## Внутри ли формы карты точка (в клетках). Без формы — вся карта.
+func _in_shape(px: float, py: float) -> bool:
+	var cx := W * 0.5
+	var cy := H * 0.5
+	match String(map.get("shape", "")):
+		"oval", "circle":
+			var rx := W * 0.5 - 0.5
+			var ry := H * 0.5 - 0.5
+			var dx := (px - cx) / rx
+			var dy := (py - cy) / ry
+			return dx * dx + dy * dy <= 1.0
+		"round":
+			var r := minf(W, H) * 0.16
+			var qx := absf(px - cx) - (W * 0.5 - r)
+			var qy := absf(py - cy) - (H * 0.5 - r)
+			if qx <= 0.0 or qy <= 0.0:
+				return absf(px - cx) <= W * 0.5 and absf(py - cy) <= H * 0.5
+			return qx * qx + qy * qy <= r * r
+	return true
+
+
+## Клетка за пределами формы карты (физически — стена, рисуется как фон за картой).
+func _void_at(x: int, y: int) -> bool:
+	return has_shape and not _in_shape(x + 0.5, y + 0.5)
+
+
+## Углы лучей: равномерные плюс направления на углы карты (чтобы затемнение снаружи закрывало и уголки).
+func _shape_angles(n: int) -> Array:
+	var angs := []
+	for k in n:
+		angs.append(TAU * k / n)
+	for corner in [Vector2(1, 1), Vector2(-1, 1), Vector2(-1, -1), Vector2(1, -1)]:
+		angs.append(fposmod((Vector2(W, H) * 0.5 * corner).angle(), TAU))
+	angs.sort()
+	return angs
+
+
+## Затемнение снаружи формы: полосы между контуром и краем карты (одна команда отрисовки).
+var _ext_pts := PackedVector2Array()
+var _ext_idx := PackedInt32Array()
+
+
+func _build_exterior() -> void:
+	var inner := _shape_points()
+	var c := Vector2(W, H) * 0.5 * CELL
+	var half := Vector2(W, H) * 0.5 * CELL
+	var outer := PackedVector2Array()
+	for p in inner:
+		var d := (p - c).normalized()
+		var t := minf(half.x / maxf(absf(d.x), 1e-6), half.y / maxf(absf(d.y), 1e-6))
+		outer.append(c + d * t)
+	_ext_pts = PackedVector2Array()
+	_ext_idx = PackedInt32Array()
+	var n := inner.size()
+	for k in n:
+		var k2 := (k + 1) % n
+		var base := _ext_pts.size()
+		_ext_pts.append_array([inner[k], outer[k], outer[k2], inner[k2]])
+		_ext_idx.append_array([base, base + 1, base + 2, base, base + 2, base + 3])
+
+
+## Контур формы в мировых координатах (для границы и затемнения снаружи).
+func _shape_points(n: int = 120) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	var c := Vector2(W, H) * 0.5
+	for a in _shape_angles(n):
+		var d := Vector2.from_angle(a)
+		var lo := 0.0
+		var hi := float(maxi(W, H))
+		for it in 18:
+			var mid := (lo + hi) * 0.5
+			var p := c + d * mid
+			if _in_shape(p.x, p.y):
+				lo = mid
+			else:
+				hi = mid
+		pts.append((c + d * lo) * CELL)
+	return pts
+
+
+func _build_scene() -> Dictionary:
+	var n := W * H
+	var m := PackedByteArray()
+	m.resize(n)
+	m.fill(0)
+	var vm := PackedByteArray()
+	vm.resize(n)
+	vm.fill(0)
+	for y in H:
+		for x in W:
+			if _void_at(x, y):
+				vm[y * W + x] = 1
+				m[y * W + x] = 2
+	for st in map["scene"]:
+		_stroke(m, st)
+	# площадка у старта всегда свободна
+	var r := int(ceil(START_CLEAR)) + 2
+	for y in range(start_cell.y - r, start_cell.y + r + 1):
+		for x in range(start_cell.x - r, start_cell.x + r + 1):
+			if x >= 0 and y >= 0 and x < W and y < H and vm[y * W + x] == 0:
+				m[y * W + x] = 0
+	_open_enclosed(m, vm)
+	return {"x0": 0, "y0": 0, "w": W, "h": H, "mask": m}
+
+
+func _cellp(p) -> Vector2i:
+	return Vector2i(int(round(float(p[0]) * (W - 1))), int(round(float(p[1]) * (H - 1))))
+
+
+func _plot(m: PackedByteArray, x: int, y: int) -> void:
+	if x >= 0 and y >= 0 and x < W and y < H:
+		m[y * W + x] = 2
+
+
+func _line_cells(m: PackedByteArray, a: Vector2i, b: Vector2i) -> void:
+	# 4-связный Брезенхэм: за шаг — одна ось, поэтому у линии нет диагональных щелей и шар сквозь неё не проскочит
+	var x := a.x
+	var y := a.y
+	var dx := absi(b.x - a.x)
+	var dy := absi(b.y - a.y)
+	var sx := 1 if a.x < b.x else -1
+	var sy := 1 if a.y < b.y else -1
+	var err := dx - dy
+	_plot(m, x, y)
+	while x != b.x or y != b.y:
+		if 2 * err > -dy and x != b.x:
+			err -= dy
+			x += sx
+		else:
+			err += dx
+			y += sy
+		_plot(m, x, y)
+
+
+func _poly_cells(m: PackedByteArray, pts: Array, closed: bool) -> void:
+	for k in pts.size() - 1:
+		_line_cells(m, pts[k], pts[k + 1])
+	if closed and pts.size() > 2:
+		_line_cells(m, pts[-1], pts[0])
+
+
+## Штрихи сцены (координаты — доли карты; радиусы — доли меньшей стороны):
+##   ["line", [[x,y],…], closed]    ["circle", [cx,cy], r]    ["arc", [cx,cy], r, от°, до°]
+##   ["dots", [x0,y0], [x1,y1], шаг_клеток]    ["stars", [x,y,w,h], сколько, сид]
+##   ["tpl", имя_шаблона, [x,y,w,h], зеркально]    ["wave", [x0,y], x1, амплитуда, период]
+func _stroke(m: PackedByteArray, st: Array) -> void:
+	var mn := float(mini(W, H))
+	match String(st[0]):
+		"line":
+			var pts := []
+			for p in st[1]:
+				pts.append(_cellp(p))
+			_poly_cells(m, pts, st.size() > 2 and bool(st[2]))
+		"circle", "arc":
+			var c := Vector2(float(st[1][0]) * (W - 1), float(st[1][1]) * (H - 1))
+			var rr := float(st[2]) * mn
+			var a0 := 0.0 if st[0] == "circle" else deg_to_rad(float(st[3]))
+			var a1 := TAU if st[0] == "circle" else deg_to_rad(float(st[4]))
+			var segs := maxi(12, int(rr * absf(a1 - a0)))
+			var pts := []
+			for k in segs + 1:
+				var a := lerpf(a0, a1, float(k) / segs)
+				var p := c + Vector2(cos(a), sin(a)) * rr
+				pts.append(Vector2i(int(round(p.x)), int(round(p.y))))
+			_poly_cells(m, pts, false)
+		"dots":
+			var a := _cellp(st[1])
+			var b := _cellp(st[2])
+			var step := maxi(2, int(st[3]))
+			var len := Vector2(b - a).length()
+			var k := 0.0
+			while k <= len:
+				var p := Vector2(a).lerp(Vector2(b), k / maxf(1.0, len))
+				_plot(m, int(round(p.x)), int(round(p.y)))
+				k += step
+		"stars":
+			var rng := RandomNumberGenerator.new()
+			rng.seed = int(st[3])
+			var rc: Array = st[1]
+			for k in int(st[2]):
+				var x := int((float(rc[0]) + rng.randf() * float(rc[2])) * (W - 1))
+				var y := int((float(rc[1]) + rng.randf() * float(rc[3])) * (H - 1))
+				_plot(m, x, y)
+				if rng.randf() < 0.4:   # часть звёзд — крестиком
+					_plot(m, x - 1, y)
+					_plot(m, x + 1, y)
+					_plot(m, x, y - 1)
+					_plot(m, x, y + 1)
+		"tpl":
+			var rc: Array = st[2]
+			var flip: bool = st.size() > 3 and bool(st[3])
+			var ox := float(rc[0]) * (W - 1)
+			var oy := float(rc[1]) * (H - 1)
+			var sw := float(rc[2]) * (W - 1)
+			var sh := float(rc[3]) * (H - 1)
+			for poly in templates[String(st[1])]:
+				var pts := []
+				for v in poly:
+					var u: Vector2 = Vector2(1.0 - v.x, v.y) if flip else v
+					pts.append(Vector2i(int(round(ox + u.x * sw)), int(round(oy + u.y * sh))))
+				_poly_cells(m, pts, true)
+		"wave":
+			var x0 := float(st[1][0])
+			var y0 := float(st[1][1])
+			var x1 := float(st[2])
+			var amp := float(st[3])
+			var per := float(st[4])
+			var pts := []
+			var steps := maxi(8, int((x1 - x0) * W))
+			for k in steps + 1:
+				var xf := lerpf(x0, x1, float(k) / steps)
+				pts.append(_cellp([xf, y0 + amp * sin(TAU * (xf - x0) / per)]))
+			_poly_cells(m, pts, false)
+
+
+## Проходы в закрытых контурах: поиск в ширину, где пересечь стену стоит 1, пройти по свободной клетке — 0.
+## Для каждой недостижимой области вскрывается кратчайший путь сквозь стены — минимум разрывов в линиях.
+func _open_enclosed(m: PackedByteArray, vm: PackedByteArray) -> void:
+	var n := W * H
+	var s := start_cell.y * W + start_cell.x
+	var dist := PackedInt32Array()
+	dist.resize(n)
+	dist.fill(1 << 30)
+	var par := PackedInt32Array()
+	par.resize(n)
+	par.fill(-1)
+	var buckets := [PackedInt32Array([s])]
+	dist[s] = 0
+	var d := 0
+	while d < buckets.size():
+		var b: PackedInt32Array = buckets[d]
+		var i := 0
+		while i < b.size():
+			var v := b[i]
+			i += 1
+			if dist[v] != d:
+				continue
+			var vx := v % W
+			for u in [v - 1, v + 1, v - W, v + W]:
+				if u < 0 or u >= n or vm[u] == 1:
+					continue
+				if (u == v - 1 and vx == 0) or (u == v + 1 and vx == W - 1):
+					continue
+				var nd := d + (1 if m[u] == 2 else 0)
+				if nd < dist[u]:
+					dist[u] = nd
+					par[u] = v
+					if nd == d:
+						b.append(u)
+					else:
+						while buckets.size() <= nd:
+							buckets.append(PackedInt32Array())
+						buckets[nd].append(u)
+		d += 1
+	var reach := PackedByteArray()
+	reach.resize(n)
+	reach.fill(0)
+	_flood(m, vm, reach, s)
+	for v in n:
+		if m[v] != 0 or reach[v] == 1 or vm[v] == 1:
+			continue
+		var w := v
+		while w >= 0 and reach[w] == 0:
+			if m[w] == 2:
+				m[w] = 0
+			w = par[w]
+		_flood(m, vm, reach, v)
+
+
+func _flood(m: PackedByteArray, vm: PackedByteArray, reach: PackedByteArray, s: int) -> void:
+	var n := W * H
+	var q := PackedInt32Array([s])
+	reach[s] = 1
+	var i := 0
+	while i < q.size():
+		var v := q[i]
+		i += 1
+		var vx := v % W
+		for u in [v - 1, v + 1, v - W, v + W]:
+			if u < 0 or u >= n or reach[u] == 1 or m[u] != 0 or vm[u] == 1:
+				continue
+			if (u == v - 1 and vx == 0) or (u == v + 1 and vx == W - 1):
+				continue
+			reach[u] = 1
+			q.append(u)
+
+
 func _region(rx: int, ry: int):
 	var key := ry * 1000003 + rx
 	if region_cache.has(key):
@@ -407,7 +704,10 @@ func _region(rx: int, ry: int):
 	if has_meta("test_no_pictures"):   # только для теста «стены из сохранения не зависят от генератора»
 		return null
 	var res = null
-	if map.has("fixed"):
+	if map.has("scene"):
+		if rx == 0 and ry == 0:
+			res = _build_scene()
+	elif map.has("fixed"):
 		if rx == 0 and ry == 0:
 			res = _build_picture(map["fixed"], Rect2i(0, 0, W, H))
 	else:
@@ -1909,7 +2209,7 @@ func _draw_chunk(ck: int) -> void:
 				n.draw_rect(r.grow(-2.0), Color(0.2, 0.9, 0.2), false, 3.0)
 	# стены: цельная белая фигура с фасками, тенью и швами между кубиками
 	for li in CS * CS:
-		if kind[li] != 2 or vis[li] == 0:
+		if kind[li] != 2:
 			continue
 		var lx := li & 31
 		var ly := li >> 5
@@ -1917,13 +2217,18 @@ func _draw_chunk(ck: int) -> void:
 		var gy := y0 + ly
 		var px := lx * CELL
 		var py := ly * CELL
+		if has_shape and _void_at(gx, gy):
+			n.draw_rect(Rect2(px, py, CELL, CELL), OUTSIDE)   # за формой карты — фон, а не стена
+			continue
+		if vis[li] == 0:
+			continue
 		if not detail:
 			n.draw_rect(Rect2(px, py, CELL, CELL), WALL_FACE)
 			continue
-		var up := _kind_at(gx, gy - 1) == 2
-		var dn := _kind_at(gx, gy + 1) == 2
-		var lf := _kind_at(gx - 1, gy) == 2
-		var rt := _kind_at(gx + 1, gy) == 2
+		var up := _kind_at(gx, gy - 1) == 2 and not _void_at(gx, gy - 1)
+		var dn := _kind_at(gx, gy + 1) == 2 and not _void_at(gx, gy + 1)
+		var lf := _kind_at(gx - 1, gy) == 2 and not _void_at(gx - 1, gy)
+		var rt := _kind_at(gx + 1, gy) == 2 and not _void_at(gx + 1, gy)
 		if not dn and gy + 1 < H:
 			n.draw_rect(Rect2(px + 4.0, py + CELL, CELL, 9.0), Color(0, 0, 0, 0.3))
 		if not rt and gx + 1 < W:
@@ -1997,7 +2302,7 @@ func _build_fog_edge(c, vis: PackedByteArray, x0: int, y0: int, gw: int, gh: int
 	var idx := PackedInt32Array()
 	for ly in gh:
 		for lx in gw:
-			if vis[(ly << 5) | lx] == 1:
+			if vis[(ly << 5) | lx] == 1 or (has_shape and _void_at(x0 + lx, y0 + ly)):
 				continue
 			var a0: int = vd[(ly + 1) * vw + lx + 1]
 			var a1: int = vd[(ly + 1) * vw + lx + 2]
@@ -2031,7 +2336,9 @@ func _build_chunk_tex(c) -> void:
 	var img := Image.create(CS, CS, false, Image.FORMAT_RGBA8)
 	for li in CS * CS:
 		var col := Color(0, 0, 0, 0)
-		if c.vis[li] == 1:
+		if has_shape and c.kind[li] == 2 and _void_at(c.ox + (li & 31), c.oy + (li >> 5)):
+			col = OUTSIDE
+		elif c.vis[li] == 1:
 			match c.kind[li]:
 				0:
 					col = floor_col
@@ -2077,6 +2384,13 @@ func _launch_from(w: Vector2):
 
 ## Сетка в тумане (только вблизи) и затемнение за пределами карты — в пределах экрана.
 func _draw_frame() -> void:
+	if has_shape:
+		if _ext_idx.is_empty():
+			_build_exterior()
+		var cols := PackedColorArray()
+		cols.resize(_ext_pts.size())
+		cols.fill(OUTSIDE)
+		RenderingServer.canvas_item_add_triangle_array(frame_node.get_canvas_item(), _ext_idx, _ext_pts, cols)
 	var v := _view_rect().grow(CELL)
 	var world := Rect2(0, 0, wpx, hpx)
 	# за картой — темнее тумана, чтобы край читался даже без рамки
@@ -2112,6 +2426,13 @@ func _draw_frame() -> void:
 ## Граница карты: яркая рамка поверх кусков (видна, когда край карты на экране).
 func _draw_border() -> void:
 	var w := maxf(3.0, 4.0 / zoom)
+	if has_shape:
+		if shape_pts.is_empty():
+			shape_pts = _shape_points()
+			shape_pts.append(shape_pts[0])
+		border_node.draw_polyline(shape_pts, Color(BORDER.r, BORDER.g, BORDER.b, 0.18), w * 3.0)
+		border_node.draw_polyline(shape_pts, BORDER, w)
+		return
 	var r := Rect2(0, 0, wpx, hpx)
 	border_node.draw_rect(r.grow(w * 1.5), Color(BORDER.r, BORDER.g, BORDER.b, 0.18), false, w * 3.0)
 	border_node.draw_rect(r.grow(w * 0.5), BORDER, false, w)

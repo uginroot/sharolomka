@@ -1130,8 +1130,8 @@ func test_legacy() -> void:
 
 ## Раскладки картинок — узоры, а не россыпь: в кольце один мотив, левая половина зеркальная, детерминировано.
 func test_layouts() -> void:
-	var g = await new_game(3)   # «Кошачий двор», кольца
-	check(g.map["layout"] == "rings", "у «Кошачьего двора» не кольца")
+	var g = await new_game(4)   # «Горы», лучи (мотив, как и у колец, задаёт кольцо)
+	check(g.map["layout"] == "rays", "у «Гор» не лучи")
 	var by_ring := {}
 	var slots := 0
 	var flips_ok := true
@@ -1689,3 +1689,45 @@ func test_upgrade_captions_values() -> void:
 	check(g._track_caption("banner", "radius").ends_with("3 кл → 4 кл"), "радиус ауры без единиц: %s" % g._track_caption("banner", "radius"))
 	check(g._track_caption("basic", "speed").begins_with("Скорость: ") and g._track_caption("basic", "speed").ends_with("кл/с"), "скорость: %s" % g._track_caption("basic", "speed"))
 	check(g._ev_caption("sniper", "shotgun_cheap").begins_with("Массовое производство: 0% → −5%"), "скидка на нулевом уровне: %s" % g._ev_caption("sniper", "shotgun_cheap"))
+
+
+
+## Карты-сцены: форма (снаружи — стена-фон), рисунок из стен, свободный старт, все квадраты достижимы.
+func test_scene_maps() -> void:
+	for i in [2, 3]:
+		var g = await new_game(i)
+		check(g.has_shape and g.map.has("scene"), "карта %d не сцена" % i)
+		var walls := 0
+		var voids := 0
+		for y in g.H:
+			for x in g.W:
+				var k: int = g._kind_at(x, y)
+				if g._void_at(x, y):
+					voids += 1
+					check(k == 2, "за формой карты не стена: (%d,%d) %d" % [x, y, k])
+				elif k == 2:
+					walls += 1
+		check(voids > 0, "у карты %d нет области за формой" % i)
+		check(walls > 150, "в сцене %d мало линий рисунка: %d" % [i, walls])
+		check(g._kind_at(g.start_cell.x, g.start_cell.y) == 0, "старт сцены %d занят" % i)
+		# достижимость: от старта по свободным и квадратам (квадраты проходимы — их разбивают)
+		var seen := {}
+		var q := [g.start_cell]
+		seen[g.start_cell] = true
+		while not q.is_empty():
+			var c: Vector2i = q.pop_back()
+			for o in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var nc: Vector2i = c + o
+				if seen.has(nc) or nc.x < 0 or nc.y < 0 or nc.x >= g.W or nc.y >= g.H:
+					continue
+				if g._kind_at(nc.x, nc.y) == 2:
+					continue
+				seen[nc] = true
+				q.append(nc)
+		var lost := 0
+		for y in g.H:
+			for x in g.W:
+				if g._kind_at(x, y) == 1 and not seen.has(Vector2i(x, y)):
+					lost += 1
+		check(lost == 0, "в сцене %d недостижимых квадратов: %d" % [i, lost])
+		check(g.shape_pts.size() == 0 or g.shape_pts.size() > 100, "контур формы")
