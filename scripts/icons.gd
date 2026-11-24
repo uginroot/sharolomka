@@ -121,6 +121,21 @@ static func ball_type(t: String, col: Color, sz: int = 96, ui: bool = false) -> 
 		_fill_ss(img, Color(0.05, 0.06, 0.1, 0.9), func(x, y): return _in_tri(Vector2(x, y), a + Vector2(-2, -2.5), b + Vector2(3.5, 0), d + Vector2(-2, 2.5)),
 			Rect2(a.x - 3, a.y - 3, r * 1.3, r * 0.8))
 		_fill_ss(img, Color(1, 1, 1), func(x, y): return _in_tri(Vector2(x, y), a, b, d), Rect2(a.x, a.y, r * 1.2, r * 0.7))
+	if t == "poison":
+		# Антониевый — сам шар-капля: круглый низ и заострённый кончик вверх. Отличие — в контуре, поэтому
+		# тип читается и в мелком масштабе (белая капля внутри круга на телефоне не различалась)
+		var dc := c + Vector2(0, r * 0.22)
+		var dr := r * 0.9
+		var tip := c + Vector2(0, -r * 1.38)
+		var bl := dc + Vector2(-dr * 0.78, -dr * 0.62)
+		var br := dc + Vector2(dr * 0.78, -dr * 0.62)
+		var inside := func(p: Vector2, grow: float) -> bool:
+			return p.distance_to(dc) <= dr + grow or _in_tri(p, tip + Vector2(0, -grow * 1.6), bl + Vector2(-grow, 0), br + Vector2(grow, 0))
+		var box := Rect2(c.x - r * 1.1, tip.y - 3.0, r * 2.2, dc.y + dr - tip.y + 6.0)
+		_fill_ss(img, Color(0.05, 0.06, 0.1, 0.85), func(x, y): return inside.call(Vector2(x, y), 1.5), box)
+		_fill_ss(img, col, func(x, y): return inside.call(Vector2(x, y), 0.0), box)
+		_disk(img, dc.x - dr * 0.34, dc.y - dr * 0.2, dr * 0.24, Color(1, 1, 1, 0.85))
+		return _tex(img)
 	_disk(img, c.x, c.y, r + 1.5, Color(0.05, 0.06, 0.1, 0.85))
 	_disk(img, c.x, c.y, r, col)
 	match t:
@@ -129,14 +144,6 @@ static func ball_type(t: String, col: Color, sz: int = 96, ui: bool = false) -> 
 				var d := Vector2(x, y).distance_to(c)
 				return d <= r and d >= r * 0.66, Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0))
 			_disk(img, c.x, c.y, r * 0.4, col.darkened(0.5))
-		"poison":
-			var dc := c + Vector2(0, r * 0.18)
-			var dr := r * 0.42
-			var tip := c + Vector2(0, -r * 0.62)
-			_fill_ss(img, Color(1, 1, 1, 0.95), func(x, y):
-				var p := Vector2(x, y)
-				return p.distance_to(dc) <= dr or _in_tri(p, tip, dc + Vector2(-dr * 0.92, -dr * 0.3), dc + Vector2(dr * 0.92, -dr * 0.3)),
-				Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0))
 		_:
 			_disk(img, c.x - r * 0.32, c.y - r * 0.32, r * 0.26, Color(1, 1, 1, 0.85))
 	return _tex(img)
