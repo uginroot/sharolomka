@@ -571,6 +571,14 @@ func test_bottom_bar_fits() -> void:
 					var fsz: int = bb.get_theme_font_size("font_size")
 					var w1: float = GameData.font.get_string_size(bb.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
 					# с переносом строки текст может занимать 2 строки — ширина самого длинного слова должна влезать
+					# мерить ширину имеет смысл, только если встроенный шрифт содержит все символы: иначе в окружении
+					# без системных шрифтов (CI) меряются запасные глифы, а на телефоне шрифт письменности есть
+					var covered := true
+					for ch in bb.text:
+						if not GameData.font.has_char(ch.unicode_at(0)):
+							covered = false
+					if not covered:
+						continue
 					var longest := 0.0
 					for word in bb.text.split(" "):
 						longest = maxf(longest, GameData.font.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x)
