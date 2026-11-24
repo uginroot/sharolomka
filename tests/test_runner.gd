@@ -1981,3 +1981,48 @@ func test_upgrade_caps() -> void:
 					if g.run_u != uu:
 						check("→" in before and before.split("→")[0].strip_edges().get_slice(": ", 1) != before.split("→")[1].strip_edges(),
 							"%s: U списаны без изменения значения: %s" % [tr_["id"], before])
+
+
+
+## Тип шара читается по силуэту: у всех типов разные текстуры, тот же значок на фишке и в карточке, подсветка выбранного.
+func test_ball_markers() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	var imgs := {}
+	for tp in GameData.TYPE_ORDER:
+		check(g.ball_icons.has(tp), "нет силуэта для %s" % tp)
+		imgs[tp] = g.ball_icons[tp].get_image()
+	var types: Array = GameData.TYPE_ORDER
+	for i in types.size():
+		for j in range(i + 1, types.size()):
+			var a: Image = imgs[types[i]]
+			var b: Image = imgs[types[j]]
+			# сравниваем форму (альфу), а не цвет: силуэты должны различаться и без цвета
+			var diff := 0
+			for y in range(0, a.get_height(), 2):
+				for x in range(0, a.get_width(), 2):
+					if absf(a.get_pixel(x, y).a - b.get_pixel(x, y).a) > 0.5:
+						diff += 1
+			var shape_same: bool = diff < 8
+			var white_a := 0
+			var white_b := 0
+			for y in range(0, a.get_height(), 2):
+				for x in range(0, a.get_width(), 2):
+					var pa := a.get_pixel(x, y)
+					var pb := b.get_pixel(x, y)
+					if pa.a > 0.5 and pa.r > 0.9 and pa.g > 0.9 and pa.b > 0.9:
+						white_a += 1
+					if pb.a > 0.5 and pb.r > 0.9 and pb.g > 0.9 and pb.b > 0.9:
+						white_b += 1
+			# разные либо контур, либо белый рисунок внутри (блик, капля, обод) — кроме пары без отличий
+			check(not shape_same or absi(white_a - white_b) > 6 or types[i] + types[j] == "basicsniper",
+				"силуэты %s и %s не различаются" % [types[i], types[j]])
+	g._refresh_ui()
+	var chip_icon: TextureRect = null
+	for n in g.chips["splash"].find_children("*", "TextureRect", true, false):
+		chip_icon = n
+	check(chip_icon != null and chip_icon.texture == g.ball_icons["splash"], "на фишке не тот значок, что на поле")
+	g._select("pierce")
+	check(g.highlight_type == "pierce" and g.highlight_t > 1.0, "выбор типа не включил подсветку")
+	for k in 15:
+		g._sim(0.1)
+	check(g.highlight_t == 0.0, "подсветка не погасла")

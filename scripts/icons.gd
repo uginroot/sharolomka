@@ -43,6 +43,86 @@ static func ball(sz: int = 64) -> ImageTexture:
 	return _tex(img)
 
 
+## Запас места вокруг шара в текстуре силуэта (под кольцо Никитиевого и флажок Знаменосца).
+const BALL_K := 1.5
+
+
+## Заливка со сглаживанием: покрытие пикселя по 3×3 подвыборкам; inside(x, y) — внутри ли фигуры.
+static func _fill_ss(img: Image, c: Color, inside: Callable, box: Rect2) -> void:
+	var sz := img.get_width()
+	var x0 := maxi(0, int(box.position.x) - 1)
+	var y0 := maxi(0, int(box.position.y) - 1)
+	var x1 := mini(sz - 1, int(box.end.x) + 1)
+	var y1 := mini(sz - 1, int(box.end.y) + 1)
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			var n := 0
+			for sy in 3:
+				for sx in 3:
+					if inside.call(x + (sx + 0.5) / 3.0, y + (sy + 0.5) / 3.0):
+						n += 1
+			if n > 0:
+				_blend(img, x, y, c, n / 9.0)
+
+
+static func _in_tri(p: Vector2, a: Vector2, b: Vector2, c: Vector2) -> bool:
+	var d1 := (p - b).cross(a - b)
+	var d2 := (p - c).cross(b - c)
+	var d3 := (p - a).cross(c - a)
+	var neg := d1 < 0.0 or d2 < 0.0 or d3 < 0.0
+	var pos := d1 > 0.0 or d2 > 0.0 or d3 > 0.0
+	return not (neg and pos)
+
+
+## Силуэт шара по типу (цветной, без модуляции): тип читается по форме, а не только по цвету.
+##   basic — круг с бликом; sniper — круг (шлейф рисуется на лету по полёту); splash — пунктирное кольцо;
+##   poison — белая капля; banner — флажок; pierce — толстый белый обод и тёмная сердцевина.
+static func ball_type(t: String, col: Color, sz: int = 96) -> ImageTexture:
+	var img := _img(sz)
+	var h := sz * 0.5
+	var r := h / BALL_K
+	var c := Vector2(h, h)
+	if t == "splash":
+		var rr := r * 1.4
+		var w := r * 0.13
+		_fill_ss(img, col, func(x, y):
+			var v := Vector2(x, y) - c
+			var d := v.length()
+			if absf(d - rr) > w:
+				return false
+			return int(floor((v.angle() + PI) / TAU * 10.0)) % 2 == 0, Rect2(c - Vector2(rr + w, rr + w), Vector2(rr + w, rr + w) * 2.0))
+	if t == "banner":
+		var top := c + Vector2(0, -r * 1.42)
+		var w := r * 0.1
+		_fill_ss(img, Color(1, 1, 1), func(x, y): return absf(x - c.x) <= w and y >= top.y and y <= c.y - r * 0.6,
+			Rect2(top.x - w, top.y, w * 2.0, r))
+		var a := top
+		var b := top + Vector2(r * 0.7, r * 0.2)
+		var d := top + Vector2(0, r * 0.42)
+		_fill_ss(img, Color(0.05, 0.06, 0.1, 0.85), func(x, y): return _in_tri(Vector2(x, y), a + Vector2(-1.5, -1.5), b + Vector2(2.5, 0), d + Vector2(-1.5, 1.5)),
+			Rect2(a.x - 2, a.y - 2, r * 0.8, r * 0.5))
+		_fill_ss(img, col, func(x, y): return _in_tri(Vector2(x, y), a, b, d), Rect2(a.x, a.y, r * 0.8, r * 0.5))
+	_disk(img, h, h, r + 1.5, Color(0.05, 0.06, 0.1, 0.85))
+	_disk(img, h, h, r, col)
+	match t:
+		"pierce":
+			_fill_ss(img, Color(1, 1, 1), func(x, y):
+				var d := Vector2(x, y).distance_to(c)
+				return d <= r and d >= r * 0.66, Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0))
+			_disk(img, h, h, r * 0.4, col.darkened(0.5))
+		"poison":
+			var dc := c + Vector2(0, r * 0.18)
+			var dr := r * 0.42
+			var tip := c + Vector2(0, -r * 0.62)
+			_fill_ss(img, Color(1, 1, 1, 0.95), func(x, y):
+				var p := Vector2(x, y)
+				return p.distance_to(dc) <= dr or _in_tri(p, tip, dc + Vector2(-dr * 0.92, -dr * 0.3), dc + Vector2(dr * 0.92, -dr * 0.3)),
+				Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0))
+		_:
+			_disk(img, h - r * 0.32, h - r * 0.32, r * 0.26, Color(1, 1, 1, 0.85))
+	return _tex(img)
+
+
 ## Круглый значок цвета шара для фишек и карточек.
 static func dot(col: Color, sz: int = 44) -> ImageTexture:
 	var img := _img(sz)

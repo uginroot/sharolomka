@@ -139,6 +139,10 @@ var redraw_t := 0.0
 var lod := 0                     # 0 — с цифрами, 1 — «свет», 2 — грубо, по текстуре на кусок
 var ball_layer: Node2D
 var ball_tex: ImageTexture
+var ball_icons := {}             # силуэт шара по типу: на поле, на фишках и в карточках прокачки
+var highlight_type := ""         # подсветка шаров выбранного типа (на фишке нажали) …
+var highlight_t := 0.0           # … и сколько ей ещё гореть
+const HIGHLIGHT_TIME := 1.2
 
 # ---- камера и ввод
 var cam: Camera2D
@@ -224,6 +228,8 @@ func _ready() -> void:
 	st_dmg.resize(GameData.TYPE_ORDER.size())
 	st_share.resize(GameData.TYPE_ORDER.size())
 	ball_tex = Icons.ball(64)
+	for t in GameData.TYPE_ORDER:
+		ball_icons[t] = Icons.ball_type(t, GameData.TYPES[t]["color"])
 
 	W = int(map["w"])
 	H = int(map["h"])
@@ -1351,6 +1357,8 @@ func _sim(dt: float) -> void:
 				_finale_steer(b)
 	if frenzy_t > 0.0:
 		frenzy_t = maxf(0.0, frenzy_t - dt)
+	if highlight_t > 0.0:
+		highlight_t = maxf(0.0, highlight_t - dt)
 	aura_t -= dt
 	if aura_t <= 0.0:
 		aura_t = 0.1
@@ -2206,9 +2214,27 @@ func _draw_balls() -> void:
 	var ar := aura_r_now if aura_r_now > 0.0 else _aura_radius()   # с боевым кличем круг шире
 	var acol: Color = colors["banner"]
 	acol.a = 0.35
+	var hl := highlight_t > 0.0
+	var hcol := Color(1, 1, 1, clampf(highlight_t / HIGHLIGHT_TIME, 0.0, 1.0))
 	for b in balls:
 		var dd: float = maxf(b.radius * 2.6, min_d)
-		ball_layer.draw_texture_rect(ball_tex, Rect2(b.pos.x - dd * 0.5, b.pos.y - dd * 0.5, dd, dd), false, colors[b.type])
+		if b.type == "pierce":
+			dd *= 1.25   # Отбойник крупнее — различим даже в точку
+		if b.type == "sniper":
+			# шлейф Гесиевого — против направления полёта, виден и при отдалении
+			var back: Vector2 = -b.vel.normalized() if b.vel.length_squared() > 1.0 else Vector2.ZERO
+			if back != Vector2.ZERO:
+				var side := Vector2(-back.y, back.x) * dd * 0.18
+				var c1: Color = colors["sniper"]
+				c1.a = 0.55
+				var c2: Color = colors["sniper"]
+				c2.a = 0.3
+				ball_layer.draw_line(b.pos + back * dd * 0.45 + side, b.pos + back * dd * 1.5 + side, c1, dd * 0.2)
+				ball_layer.draw_line(b.pos + back * dd * 0.45 - side, b.pos + back * dd * 1.2 - side, c2, dd * 0.2)
+		var big := dd * Icons.BALL_K
+		ball_layer.draw_texture_rect(ball_icons[b.type], Rect2(b.pos.x - big * 0.5, b.pos.y - big * 0.5, big, big), false)
+		if hl and b.type == highlight_type:
+			ball_layer.draw_arc(b.pos, dd * 0.85, 0.0, TAU, 24, hcol, maxf(2.0, 3.0 / zoom))
 		if b.type == "banner" and lod == 0:
 			ball_layer.draw_arc(b.pos, ar, 0.0, TAU, 40, acol, 1.5 / zoom)
 
@@ -2923,6 +2949,8 @@ func _relaunch_idler(p: Vector2) -> void:
 
 
 func _select(t: String) -> void:
+	highlight_type = t
+	highlight_t = HIGHLIGHT_TIME   # шары этого типа на поле на секунду получают яркий обод
 	selected = t
 	if reset_armed and (reset_cd[t] > 0.0 or int(counts[t]) == 0):
 		reset_armed = false
@@ -3302,7 +3330,7 @@ func _card_head(parent: VBoxContainer, t: String, locked: bool) -> Label:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 10)
 	parent.add_child(h)
-	h.add_child(_icon_rect(Icons.dot(def["color"], 44) if not locked else Icons.lock(40), 32))
+	h.add_child(_icon_rect(ball_icons[t] if not locked else Icons.lock(40), 40 if not locked else 32))
 	var n := _label(tr(def["name"]), "Title")
 	h.add_child(n)
 	var extra := _label("", "Muted")
@@ -3349,7 +3377,7 @@ func _rebuild_rows() -> void:
 			top.add_theme_constant_override("separation", 4)
 			top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			cv.add_child(top)
-			var ic := _icon_rect(Icons.dot(def["color"], 44), 24)
+			var ic := _icon_rect(ball_icons[t], 34)   # тот же силуэт, что на поле
 			ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			top.add_child(ic)
 			var cnt := Label.new()
