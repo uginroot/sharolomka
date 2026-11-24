@@ -91,7 +91,7 @@ static func get_map(i: int) -> Dictionary:
 	var theme: Dictionary = THEMES[k]
 	@warning_ignore("integer_division")
 	var flip: bool = ((lv - 1) / THEMES.size()) % 2 == 1   # на втором круге картины зеркальные
-	var mp := _pic(theme["pic"], {"u_rate": 2, "hp_base": HP_BASE + HP_STEP * lv, "hp_growth": 0.015,
+	var mp := _pic(theme["pic"], {"u_rate": 2, "hp_base": HP_BASE + HP_STEP * lv, "hp_growth": 0.0075,
 		"goal": int(minf(GOAL_BASE * (1.0 + GOAL_STEP * (lv - 1)), 1.0e15))})
 	mp["id"] = "lv%d" % (i + 1)
 	mp["number"] = i + 1
@@ -120,7 +120,7 @@ const LAYOUTS := ["rings", "rays", "spiral", "checker", "mosaic"]
 
 const HP_BASE := 4.0
 const HP_STEP := 0.35
-const GOAL_BASE := 200000
+const GOAL_BASE := 120000
 const GOAL_STEP := 0.05
 
 
@@ -227,9 +227,9 @@ static func get_maps() -> Array:
 			]},
 
 		# большие карты — картины из иллюстраций Fluent Emoji (MIT): маска maps/pic/<id>.png, см. tools/gen_picture_maps.py
-		_pic("mountains", {"u_rate": 3, "hp_base": 3.0, "hp_growth": 0.03, "goal": 180000}),
-		_pic("ocean", {"u_rate": 2, "hp_base": 3.5, "hp_growth": 0.02, "goal": 230000}),
-		_pic("night", {"u_rate": 2, "hp_base": 4.0, "hp_growth": 0.015, "goal": 280000}),
+		_pic("mountains", {"u_rate": 3, "hp_base": 3.0, "hp_growth": 0.015, "goal": 110000}),
+		_pic("ocean", {"u_rate": 2, "hp_base": 3.5, "hp_growth": 0.01, "goal": 110000}),
+		_pic("night", {"u_rate": 2, "hp_base": 4.0, "hp_growth": 0.0075, "goal": 130000}),
 	]
 
 
