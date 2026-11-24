@@ -58,3 +58,12 @@ godot --headless --path . res://tests/test_runner.tscn
 xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 720x1600 res://tests/ui_playtest.tscn
 ```
 CI запускает оба набора перед каждой сборкой; скриншоты UI-теста — в артефакте `screenshots`.
+
+## Иллюстрации
+
+Картины больших карт и бесконечных уровней собраны из иллюстраций
+[Microsoft Fluent Emoji](https://github.com/microsoft/fluentui-emoji) (стиль High Contrast),
+© Microsoft Corporation, лицензия MIT — исходники и текст лицензии в `art/fluent/`.
+Пересборка карт: `godot --headless --path . --script res://tools/render_svg.gd`, затем
+`python3 tools/gen_picture_maps.py` (нужны `numpy` и `Pillow`).
+

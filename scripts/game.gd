@@ -511,6 +511,24 @@ func _shape_points(n: int = 120) -> PackedVector2Array:
 	return pts
 
 
+## Карта-картина: готовая маска maps/pic/<id>.png (0 — квадрат, 128 — стена рисунка, 255 — за формой карты),
+## собранная заранее tools/gen_picture_maps.py; на втором круге бесконечных уровней — зеркально.
+func _build_pic() -> Dictionary:
+	var tex: Texture2D = load("res://maps/pic/%s.png" % String(map["pic"]))
+	var img := tex.get_image()
+	img.convert(Image.FORMAT_L8)
+	var src := img.get_data()
+	var m := PackedByteArray()
+	m.resize(W * H)
+	var flip: bool = map.get("flip", false)
+	for y in H:
+		var row := y * W
+		for x in W:
+			var v: int = src[row + (W - 1 - x if flip else x)]
+			m[row + x] = 2 if v >= 64 else 0
+	return {"x0": 0, "y0": 0, "w": W, "h": H, "mask": m}
+
+
 func _build_scene() -> Dictionary:
 	var n := W * H
 	var m := PackedByteArray()
@@ -695,7 +713,12 @@ func _open_enclosed(m: PackedByteArray, vm: PackedByteArray) -> void:
 		var w := v
 		while w >= 0 and reach[w] == 0:
 			if m[w] == 2:
-				m[w] = 0
+				# проход шириной 3 клетки: в щель в одну клетку шары попадали редко, отсеки расчищались долго
+				for oy in range(-1, 2):
+					for ox in range(-1, 2):
+						var u := w + oy * W + ox
+						if u >= 0 and u < W * H and vm[u] == 0 and absi((u % W) - (w % W)) <= 1:
+							m[u] = 0 if m[u] == 2 else m[u]
 			w = par[w]
 		_flood(m, vm, reach, v)
 
@@ -725,7 +748,10 @@ func _region(rx: int, ry: int):
 	if has_meta("test_no_pictures"):   # только для теста «стены из сохранения не зависят от генератора»
 		return null
 	var res = null
-	if map.has("scene"):
+	if map.has("pic"):
+		if rx == 0 and ry == 0:
+			res = _build_pic()
+	elif map.has("scene"):
 		if rx == 0 and ry == 0:
 			res = _build_scene()
 	elif map.has("fixed"):
@@ -1047,7 +1073,7 @@ func _load_state() -> float:
 	if f == null:
 		return 0.0
 	var s = f.get_var()
-	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 7 or int(s.get("w", 0)) != W:
+	if typeof(s) != TYPE_DICTIONARY or int(s.get("ver", 0)) != 8 or int(s.get("w", 0)) != W:
 		return 0.0
 	coins = int(s.get("coins", s.get("rubles", 0)))   # до v0.14 ключ назывался "rubles"
 	destroyed = int(s.get("destroyed", 0))
@@ -1117,7 +1143,7 @@ func _save_state() -> void:
 			c.blob_dirty = false
 		out[ck] = c.blob
 	var s := {
-		"ver": 7, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
+		"ver": 8, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
 		"counts": counts.duplicate(), "tracks": tlvl.duplicate(true), "unl": unl.duplicate(),
 		"evo": evo.duplicate(true), "elvl": elvl.duplicate(true), "extra": extra.duplicate(), "time": play_time,
 		"dmg_total": dmg_total.duplicate(),

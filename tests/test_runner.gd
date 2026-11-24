@@ -476,8 +476,8 @@ func test_translations_complete() -> void:
 		keys[GameData.FLEET_DESC[f]] = "game_data.gd (бонус стаи)"
 	for mp in preload("res://scripts/maps.gd").get_maps():
 		keys[mp["name"]] = "maps.gd"
-	for th in preload("res://scripts/maps.gd").THEMES:
-		keys[th["name"]] = "maps.gd (темы)"
+	for id in preload("res://scripts/picture_maps.gd").PICS:
+		keys[preload("res://scripts/picture_maps.gd").PICS[id]["name"]] = "picture_maps.gd"
 	for tp in GameData.EVOS:
 		for e in GameData.EVOS[tp]:
 			keys[e["name"]] = "game_data.gd (эволюции)"
@@ -1182,37 +1182,6 @@ func test_legacy() -> void:
 	check(GameData.stars == 1 + 1 + 2 and not GameData.meta.has("splash"), "★ за «Арсенал» не вернулись: %d" % GameData.stars)
 
 
-## Раскладки картинок — узоры, а не россыпь: в кольце один мотив, левая половина зеркальная, детерминировано.
-func test_layouts() -> void:
-	var g = await new_game(4)   # «Горы», лучи (мотив, как и у колец, задаёт кольцо)
-	check(g.map["layout"] == "rays", "у «Гор» не лучи")
-	var by_ring := {}
-	var slots := 0
-	var flips_ok := true
-	for ry in range(0, g.H / g.region_size + 1):
-		for rx in range(0, g.W / g.region_size + 1):
-			var s: Array = g._layout_slot(rx, ry)
-			if s.is_empty():
-				continue
-			slots += 1
-			var c: Vector2 = (Vector2(rx, ry) + Vector2(0.5, 0.5)) * g.region_size
-			var d: Vector2 = c - (Vector2(g.start_cell) + Vector2(0.5, 0.5))
-			var ring := int(round(d.length() / g.region_size))
-			if by_ring.has(ring) and by_ring[ring] != s[0]:
-				check(false, "в кольце %d разные мотивы: %s и %s" % [ring, by_ring[ring], s[0]])
-			by_ring[ring] = s[0]
-			if bool(s[2]) != (d.x < 0.0):
-				flips_ok = false
-			check(s == g._layout_slot(rx, ry), "раскладка недетерминирована")
-	check(slots > 10, "картинок слишком мало: %d" % slots)
-	check(flips_ok, "левая половина не зеркальная")
-	# у всех раскладок есть картинки, и бесконечные уровни получают разные узоры
-	var seen := {}
-	for i in range(7, 20):
-		seen[preload("res://scripts/maps.gd").get_map(i)["layout"]] = true
-	check(seen.size() >= 4, "у бесконечных уровней мало разных узоров: %s" % str(seen.keys()))
-
-
 ## Звуки: все загружены, выключатель работает, частые звуки ограничены по частоте.
 func test_audio() -> void:
 	for s in Sfx.SOUNDS:
@@ -1608,24 +1577,27 @@ func test_evolution_mechanics_a() -> void:
 		g._buy_ladder("sniper", "shotgun_cheap")
 	var nodisc := int(round((50.0 + 5.0) * 1.12))
 	check(g._ball_cost("sniper") < nodisc, "«Массовое производство» не снизило цену: %d" % g._ball_cost("sniper"))
-	# Площадь: удар по соседям на радиус 2
+	# Площадь: удар по соседям на радиус 2 (сила удара прокачана — доля по соседу целая, без случайности)
 	g._buy_evo("splash", "area")
+	g.coins = 100000
+	for k in 3:
+		g._buy_track("splash", "impact")
 	g.balls.clear()
 	g._spawn_ball("splash", 0.0, g.start_pos)
 	var rb = g.balls[0]
 	var far := -1
 	var center := -1
-	for y in range(g.ey0, g.ey1 + 1):
-		for x in range(g.ex0, g.ex1 + 1):
-			if center < 0 and g._kind_at(x, y) == 1 and g._vis_at(x + 2, y) and g._kind_at(x + 2, y) == 1 and g._hp_of(y * g.W + x + 2) > 1:
+	for y in g.H:
+		for x in range(0, g.W - 2):
+			if center < 0 and g._kind_at(x, y) == 1 and g._kind_at(x + 2, y) == 1 and g._hp_of(y * g.W + x) >= 12 and g._hp_of(y * g.W + x + 2) > 4:
 				center = y * g.W + x
 				far = y * g.W + x + 2
+	check(center >= 0, "нет пары квадратов для проверки «Площади»")
 	if center >= 0:
+		g._reveal(center % g.W, center / g.W)
+		g._reveal(far % g.W, far / g.W)
 		var hf: int = g._hp_of(far)
-		for k in 20:
-			g._hit_cell(rb, center)
-			if g._hp_of(center) <= 0:
-				break
+		g._hit_cell(rb, center)
 		check(g._hp_of(far) < hf, "Площадь не достала клетку на расстоянии 2")
 	# Молния: разряд бьёт открытую породу вокруг шара
 	g._buy_evo("splash", "lightning")
@@ -1828,9 +1800,9 @@ func test_ball_damage_stats() -> void:
 	var id := -1
 	for y in g.H:
 		for x in g.W:
-			if id < 0 and g._kind_at(x, y) == 1 and g._hp_of(y * g.W + x) >= 100:
+			if id < 0 and g._kind_at(x, y) == 1 and g._hp_of(y * g.W + x) >= 60:
 				id = y * g.W + x
-	check(id >= 0, "нет квадрата со 100+ жизнями")
+	check(id >= 0, "нет квадрата с 60+ жизнями")
 	g.time_acc = 100.0
 	g._damage(id, 30, rb)
 	g._damage(id, 10, bb)
@@ -2100,3 +2072,69 @@ func test_drop_orientation() -> void:
 				maxx = maxi(maxx, x)
 	var h := w / 2.0
 	check(h - minx > maxx - h + 3.0, "у значка капли кончик не слева: влево %.0f, вправо %.0f" % [h - minx, maxx - h])
+
+
+
+## Карты-картины (Fluent Emoji): рисунок есть, старт свободен, за формой стена, все квадраты достижимы;
+## на втором круге бесконечных уровней картина зеркальная.
+func test_picture_maps() -> void:
+	var Maps = preload("res://scripts/maps.gd")
+	for i in [4, 5, 6, 7]:
+		var g = await new_game(i, func(): GameData.maps_unlocked = i + 1)
+		check(g.map.has("pic") and g.has_shape, "карта %d не картина" % i)
+		var W: int = g.W
+		var H: int = g.H
+		var walls := 0
+		var free := PackedByteArray()
+		free.resize(W * H)
+		for y in H:
+			for x in W:
+				var k: int = g._kind_at(x, y)
+				if g._void_at(x, y):
+					check(k == 2, "карта %d: за формой не стена (%d,%d)" % [i, x, y])
+					if k != 2:
+						return
+				elif k == 2:
+					walls += 1
+				else:
+					free[y * W + x] = 1
+		check(walls > 2000, "карта %d: мало линий рисунка: %d" % [i, walls])
+		check(g._kind_at(g.start_cell.x, g.start_cell.y) == 0, "карта %d: старт занят" % i)
+		# достижимость — обход по всей карте
+		var seen := PackedByteArray()
+		seen.resize(W * H)
+		var q := PackedInt32Array([g.start_cell.y * W + g.start_cell.x])
+		seen[q[0]] = 1
+		var qi := 0
+		while qi < q.size():
+			var v := q[qi]
+			qi += 1
+			var vx := v % W
+			for u in [v - 1, v + 1, v - W, v + W]:
+				if u < 0 or u >= W * H or seen[u] == 1 or free[u] == 0:
+					continue
+				if (u == v - 1 and vx == 0) or (u == v + 1 and vx == W - 1):
+					continue
+				seen[u] = 1
+				q.append(u)
+		var lost := 0
+		for v in W * H:
+			if free[v] == 1 and seen[v] == 0:
+				lost += 1
+		check(lost == 0, "карта %d: недостижимых квадратов %d" % [i, lost])
+		check(int(g.goal) < q.size(), "карта %d: цель %d больше числа квадратов %d" % [i, g.goal, q.size()])
+	# зеркальная картина на втором круге
+	var n: int = Maps.THEMES.size()
+	var a: Dictionary = Maps.get_map(7)
+	var b: Dictionary = Maps.get_map(7 + n)
+	check(a["pic"] == b["pic"] and not a.get("flip", false) and b.get("flip", false), "второй круг не зеркальный")
+	var g1 = await new_game(7, func(): GameData.maps_unlocked = 8)
+	var w1: Array = []
+	for x in g1.W:
+		w1.append(g1._kind_at(x, g1.H / 2))
+	var g2 = await new_game(7 + n, func(): GameData.maps_unlocked = 8 + n)
+	var mismatch := 0
+	for x in g2.W:
+		if g2._kind_at(x, g2.H / 2) != w1[g2.W - 1 - x] and not (g2.start_cell.distance_to(Vector2i(x, g2.H / 2)) < 8):
+			mismatch += 1
+	check(mismatch == 0, "зеркальная картина не совпадает с исходной: %d клеток" % mismatch)

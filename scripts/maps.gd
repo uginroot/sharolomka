@@ -1,4 +1,5 @@
 extends RefCounted
+const PictureMaps = preload("res://scripts/picture_maps.gd")
 ## Карты и картинки-шаблоны.
 
 const W := 700.0
@@ -65,18 +66,18 @@ const HANDMADE := 7
 
 ## Темы бесконечных уровней: название (переводится), картинки, цвет пола, сдвиг оттенка квадратов.
 const THEMES := [
-	{"name": "Пустыня", "templates": ["cactus", "mountain", "star", "drop"], "floor": Color(0.19, 0.16, 0.11), "hue": 0.05},
-	{"name": "Ледник", "templates": ["snowflake", "mountain", "gem", "star"], "floor": Color(0.1, 0.15, 0.21), "hue": -0.18},
-	{"name": "Космос", "templates": ["rocket", "star", "moon", "gem"], "floor": Color(0.07, 0.07, 0.14), "hue": 0.35},
-	{"name": "Королевство", "templates": ["crown", "castle", "heart", "gem"], "floor": Color(0.15, 0.11, 0.18), "hue": 0.5},
-	{"name": "Цветочный луг", "templates": ["flower", "tree", "mushroom", "heart"], "floor": Color(0.1, 0.17, 0.12), "hue": -0.05},
-	{"name": "Гроза", "templates": ["bolt", "drop", "moon", "star"], "floor": Color(0.12, 0.13, 0.17), "hue": -0.3},
-	{"name": "Глубины", "templates": ["fish", "drop", "star", "yarn"], "floor": Color(0.06, 0.13, 0.17), "hue": -0.22},
-	{"name": "Кошачий город", "templates": ["cat", "house", "yarn", "fish"], "floor": Color(0.14, 0.14, 0.18), "hue": 0.1},
-	{"name": "Лес", "templates": ["tree", "mushroom", "house", "flower"], "floor": Color(0.09, 0.14, 0.1), "hue": 0.0},
-	{"name": "Вулкан", "templates": ["mountain", "drop", "gem", "bolt"], "floor": Color(0.18, 0.1, 0.09), "hue": 0.12},
-	{"name": "Ночь", "templates": ["moon", "star", "cat", "house"], "floor": Color(0.08, 0.08, 0.13), "hue": 0.28},
-	{"name": "Сокровища", "templates": ["gem", "crown", "heart", "star"], "floor": Color(0.16, 0.14, 0.09), "hue": 0.08},
+	{"pic": "t_robot", "floor": Color(0.13, 0.13, 0.17), "hue": 0.1},
+	{"pic": "t_railway", "floor": Color(0.15, 0.12, 0.1), "hue": 0.05},
+	{"pic": "t_workshop", "floor": Color(0.14, 0.13, 0.12), "hue": 0.12},
+	{"pic": "t_lab", "floor": Color(0.09, 0.14, 0.13), "hue": -0.05},
+	{"pic": "t_airfield", "floor": Color(0.1, 0.13, 0.18), "hue": -0.18},
+	{"pic": "t_electric", "floor": Color(0.15, 0.14, 0.08), "hue": 0.08},
+	{"pic": "t_orbit", "floor": Color(0.07, 0.07, 0.14), "hue": 0.35},
+	{"pic": "t_plant", "floor": Color(0.13, 0.12, 0.12), "hue": 0.0},
+	{"pic": "t_computers", "floor": Color(0.1, 0.12, 0.16), "hue": -0.3},
+	{"pic": "t_space", "floor": Color(0.08, 0.08, 0.13), "hue": 0.28},
+	{"pic": "t_fleet", "floor": Color(0.06, 0.13, 0.17), "hue": -0.22},
+	{"pic": "t_field", "floor": Color(0.1, 0.15, 0.1), "hue": -0.05},
 ]
 
 
@@ -86,19 +87,29 @@ static func get_map(i: int) -> Dictionary:
 	if i < HANDMADE:
 		return get_maps()[i]
 	var lv := i - HANDMADE + 1               # 1, 2, 3, … среди бесконечных
-	var theme: Dictionary = THEMES[(lv - 1) % THEMES.size()]
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 1000003 * i + 7
-	var size: int = [4000, 6000, 8000, 10000][rng.randi() % 4]
-	return {
-		"id": "lv%d" % (i + 1), "name": theme["name"], "number": i + 1,
-		"w": size, "h": int(size * rng.randf_range(1.0, 1.25)), "aim": -70.0,
-		"u_rate": 2, "hp_base": HP_BASE + HP_STEP * lv, "hp_growth": 0.015,
-		"goal": int(minf(GOAL_BASE * (1.0 + GOAL_STEP * (lv - 1)), 1.0e15)),
-		"region": rng.randi_range(44, 72), "density": rng.randf_range(0.6, 0.78),
-		"templates": theme["templates"], "floor": theme["floor"], "hue": theme["hue"],
-		"layout": LAYOUTS[(lv * 7 + rng.randi() % 3) % LAYOUTS.size()],
-	}
+	var k := (lv - 1) % THEMES.size()
+	var theme: Dictionary = THEMES[k]
+	@warning_ignore("integer_division")
+	var flip: bool = ((lv - 1) / THEMES.size()) % 2 == 1   # на втором круге картины зеркальные
+	var mp := _pic(theme["pic"], {"u_rate": 2, "hp_base": HP_BASE + HP_STEP * lv, "hp_growth": 0.015,
+		"goal": int(minf(GOAL_BASE * (1.0 + GOAL_STEP * (lv - 1)), 1.0e15))})
+	mp["id"] = "lv%d" % (i + 1)
+	mp["number"] = i + 1
+	mp["floor"] = theme["floor"]
+	mp["hue"] = theme["hue"]
+	if flip:
+		mp["flip"] = true
+		mp["start"] = [1.0 - float(mp["start"][0]), mp["start"][1]]
+	return mp
+
+
+## Карта-картина: размер, старт и название — из сгенерированного PictureMaps.PICS.
+static func _pic(id: String, extra: Dictionary) -> Dictionary:
+	var p: Dictionary = PictureMaps.PICS[id]
+	var mp := {"id": id, "pic": id, "name": p["name"], "w": p["w"], "h": p["h"], "start": p["start"],
+		"aim": -90.0, "shape": "round", "templates": []}
+	mp.merge(extra, true)
+	return mp
 
 
 ## Бесконечные уровни растут линейно — в том же темпе, что и бонус монет (+25% за карту).
@@ -131,7 +142,7 @@ static func get_maps() -> Array:
 		{"id": "heart", "u_rate": 40, "name": "Сердце", "w": 40, "h": 48, "aim": -70.0,
 			"hp_base": 1.5, "hp_growth": 0.25, "goal": 0, "fixed": [["heart", Rect2i(9, 1, 22, 19)], ["heart", Rect2i(14, 30, 13, 13)]]},
 		{"id": "garden", "u_rate": 12, "name": "Сад", "w": 120, "h": 150, "aim": -90.0,
-			"hp_base": 2.0, "hp_growth": 0.12, "goal": 0, "shape": "oval", "templates": ["tree"], "start": [0.7, 0.86],
+			"hp_base": 2.0, "hp_growth": 0.06, "goal": 0, "shape": "oval", "templates": ["tree"], "start": [0.7, 0.18],
 			# «Ночной сад» — цельная картина: дом с трубой и дымом, большое дерево, месяц и звёзды над холмами,
 			# забор с цветами и котом на переднем плане, тропинка от двери к зрителю
 			"scene": [
@@ -170,7 +181,7 @@ static func get_maps() -> Array:
 			]},
 
 		{"id": "yard", "u_rate": 5, "name": "Кошачий двор", "w": 200, "h": 200, "aim": -90.0,
-			"hp_base": 2.5, "hp_growth": 0.06, "goal": 0, "shape": "round", "templates": ["cat"], "start": [0.68, 0.86],
+			"hp_base": 2.5, "hp_growth": 0.03, "goal": 0, "shape": "round", "templates": ["cat"], "start": [0.68, 0.86],
 			# «Кошачий двор» — цельная картина: большой дом слева, забор справа с котом, дерево за забором,
 			# верёвка с бельём между домом и деревом, солнце и облака; к коту катится клубок
 			"scene": [
@@ -215,15 +226,10 @@ static func get_maps() -> Array:
 				["line", [[0.24, 0.9], [0.3, 0.9], [0.3, 0.93], [0.24, 0.93]], true],
 			]},
 
-		{"id": "mountains", "layout": "rays", "u_rate": 3, "name": "Горы", "w": 1000, "h": 1200, "aim": -70.0,
-			"hp_base": 3.0, "hp_growth": 0.03, "goal": 180000, "region": 48, "density": 0.7,
-			"templates": ["mountain", "moon", "star", "tree", "mushroom"]},
-		{"id": "ocean", "layout": "spiral", "u_rate": 2, "name": "Океан", "w": 3000, "h": 3600, "aim": -70.0,
-			"hp_base": 3.5, "hp_growth": 0.02, "goal": 230000, "region": 56, "density": 0.65,
-			"templates": ["fish", "star", "moon", "heart", "yarn"]},
-		{"id": "night", "layout": "rings", "u_rate": 2, "name": "Звёздная ночь", "w": 10000, "h": 10000, "aim": -70.0,
-			"hp_base": 4.0, "hp_growth": 0.015, "goal": 280000, "region": 64, "density": 0.65,
-			"templates": all},
+		# большие карты — картины из иллюстраций Fluent Emoji (MIT): маска maps/pic/<id>.png, см. tools/gen_picture_maps.py
+		_pic("mountains", {"u_rate": 3, "hp_base": 3.0, "hp_growth": 0.03, "goal": 180000}),
+		_pic("ocean", {"u_rate": 2, "hp_base": 3.5, "hp_growth": 0.02, "goal": 230000}),
+		_pic("night", {"u_rate": 2, "hp_base": 4.0, "hp_growth": 0.015, "goal": 280000}),
 	]
 
 
