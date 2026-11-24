@@ -134,7 +134,11 @@ func test_maps_generate() -> void:
 	for i in maps.size():
 		var g = await new_game(i)
 		var s: Vector2i = g.start_cell
-		check(s == Vector2i(g.W / 2, g.H / 2), "%s: старт не в центре" % maps[i]["id"])
+		# старт — в центре карты, у сцен — в заданной точке переднего плана
+		var want := Vector2i(g.W / 2, g.H / 2)
+		if maps[i].has("start"):
+			want = Vector2i(int(float(maps[i]["start"][0]) * g.W), int(float(maps[i]["start"][1]) * g.H))
+		check(s == want, "%s: старт не там, где задан" % maps[i]["id"])
 		check(g._kind_at(s.x, s.y) == 0 and g._vis_at(s.x, s.y), "%s: стартовая клетка не пустая/не видна" % maps[i]["id"])
 		check(g._launch_from(g.start_pos) != null, "%s: со старта нельзя выстрелить" % maps[i]["id"])
 		check(g.balls.size() == 1, "%s: на новой карте должен быть 1 бесплатный шар" % maps[i]["id"])
@@ -1731,3 +1735,32 @@ func test_scene_maps() -> void:
 					lost += 1
 		check(lost == 0, "в сцене %d недостижимых квадратов: %d" % [i, lost])
 		check(g.shape_pts.size() == 0 or g.shape_pts.size() > 100, "контур формы")
+
+
+
+## Статистика уровней: время первого прохождения, лучшее, число прохождений; сохраняется; видна в меню.
+func test_map_stats() -> void:
+	var g = await new_game(0)
+	g.play_time = 0.0
+	g._process(0.5)
+	check(g.play_time > 0.0, "время уровня не идёт")
+	g.play_time = 1052.0
+	g._save_state()
+	check(is_equal_approx(float(GameData.map_states["meadow"]["time"]), 1052.0), "время не попало в сводку профиля")
+	GameData.record_completion("meadow", 1052.0)
+	GameData.record_completion("meadow", 900.0)
+	GameData.record_completion("meadow", 1200.0)
+	var e: Dictionary = GameData.map_stats["meadow"]
+	check(is_equal_approx(e["first"], 1052.0) and is_equal_approx(e["best"], 900.0) and e["runs"] == 3, "статистика: %s" % str(e))
+	GameData.save_game()
+	GameData.map_stats = {}
+	GameData.load_game()
+	check(GameData.map_stats.has("meadow") and int(GameData.map_stats["meadow"]["runs"]) == 3, "статистика не сохранилась")
+	check(GameData.fmt_time(1052.0) == "17:32" and GameData.fmt_time(3910.0) == "1:05:10", "формат времени")
+	var menu = load("res://scenes/main_menu.tscn").instantiate()
+	add_child(menu)
+	await get_tree().process_frame
+	var lbl: Label = menu.list.get_child(0).find_child("Stats", true, false)
+	check(lbl != null and "17:32" in lbl.text and "15:00" in lbl.text, "в меню нет статистики: %s" % (lbl.text if lbl else "—"))
+	menu.queue_free()
+	GameData.reset_all()

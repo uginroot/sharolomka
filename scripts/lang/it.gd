@@ -181,4 +181,8 @@ const T := {
 	"%s кл": "%s caselle",
 	"%s/с": "%s/s",
 	"%s с": "%s s",
+	"Время: %s": "Tempo: %s",
+	"Пройдено за %s": "Completato in %s",
+	"лучшее %s": "migliore %s",
+	"сейчас %s": "ora %s",
 }

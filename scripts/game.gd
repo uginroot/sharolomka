@@ -65,6 +65,7 @@ var run_u := 0                   # U-баллы этого уровня — тр
 var u_ppm := 0                   # шанс U-балла в квадрате на миллион
 var gold_rate := GOLD_RATE       # шанс золотого квадрата на 10 000 (+ «Наследие»)
 var frenzy_time := FRENZY_TIME
+var play_time := 0.0             # сколько игрок играет этот уровень (только пока игра открыта), с
 var coin_acc := 0.0              # дробная часть монет при бонусе
 var coin_mult := 1.0
 var frenzy_t := 0.0              # осталось «золотой лихорадки»
@@ -226,6 +227,8 @@ func _ready() -> void:
 	seed_i = _seed_of(String(map["id"]))
 	@warning_ignore("integer_division")
 	start_cell = Vector2i(W / 2, H / 2)   # прохождение начинается из центра карты
+	if map.has("start"):   # у сцен старт на переднем плане — главный рисунок в центре не стирается
+		start_cell = Vector2i(int(float(map["start"][0]) * W), int(float(map["start"][1]) * H))
 	start_pos = (Vector2(start_cell) + Vector2(0.5, 0.5)) * CELL
 	last_launch = start_pos
 	hb = float(map["hp_base"])
@@ -1051,6 +1054,7 @@ func _load_state() -> float:
 	if int(counts["basic"]) == 0:
 		counts["basic"] = 1
 	run_u = int(s.get("u", 0))
+	play_time = maxf(0.0, float(s.get("time", 0.0)))
 	saved_balls = s.get("balls", [])
 	var ll: Array = s.get("last_launch", [])
 	if ll.size() == 2:
@@ -1094,7 +1098,7 @@ func _save_state() -> void:
 	var s := {
 		"ver": 7, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
 		"counts": counts.duplicate(), "tracks": tlvl.duplicate(true), "unl": unl.duplicate(),
-		"evo": evo.duplicate(true), "elvl": elvl.duplicate(true), "extra": extra.duplicate(),
+		"evo": evo.duplicate(true), "elvl": elvl.duplicate(true), "extra": extra.duplicate(), "time": play_time,
 		"saved_at": Time.get_unix_time_from_system(), "chunks": out,
 		"balls": balls.map(func(b): return [b.type, b.pos.x, b.pos.y, b.vel.x, b.vel.y]),
 		"last_launch": [last_launch.x, last_launch.y], "aim": aim_angle, "selected": selected,
@@ -1109,7 +1113,7 @@ func _save_state() -> void:
 	f.store_var(s)
 	f.close()
 	DirAccess.rename_absolute(tmp, _save_path())
-	GameData.map_states[String(map["id"])] = {"saved": true}
+	GameData.map_states[String(map["id"])] = {"saved": true, "time": play_time}   # время — для меню
 	GameData.save_game()
 
 
@@ -1442,6 +1446,8 @@ func _update_aura() -> void:
 
 
 func _process(delta: float) -> void:
+	if not completed:
+		play_time += delta   # реальное время игры на уровне (в свёрнутом виде _process не идёт)
 	delta = minf(delta, 0.05)
 	_sim(delta)
 
@@ -2057,11 +2063,13 @@ func _check_goal() -> void:
 		var gained := GameData.stars_for(map_index, not GameData.maps_done.has(id))
 		GameData.stars += gained
 		GameData.maps_done[id] = true
+		GameData.record_completion(id, play_time)
 		GameData.maps_unlocked = maxi(GameData.maps_unlocked, map_index + 2)
 		GameData.save_game()
 		if not (track_all and alive <= 0):
 			Sfx.play("goal", 0.0)
-			_show_toast(tr("Цель уровня выполнена!\n+%d ★, открыт следующий уровень") % gained)
+			_show_toast(tr("Цель уровня выполнена!\n+%d ★, открыт следующий уровень") % gained + "\n" +
+				tr("Время: %s") % GameData.fmt_time(play_time))
 	if track_all and alive <= 0 and not completed:
 		completed = true
 		GameData.map_states.erase(String(map["id"]))

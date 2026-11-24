@@ -155,6 +155,7 @@ var unlocked := {}           # типы, открытые на старте ур
 var maps_unlocked := 1
 var maps_done := {}
 var map_states := {}
+var map_stats := {}          # статистика уровней: id → {"first": с, "best": с, "runs": n}
 var current_map := 0
 var slot := 1                # текущий профиль 1..SLOTS
 
@@ -294,6 +295,7 @@ func _reset_defaults() -> void:
 	maps_unlocked = 1
 	maps_done = {}
 	map_states = {}
+	map_stats = {}
 	refresh_unlocked()
 
 
@@ -356,7 +358,8 @@ func save_game() -> void:
 	_save_wait = 0.0
 	write_atomic(save_path(), JSON.stringify({
 		"ver": 2, "stars": stars, "meta": meta, "maps_unlocked": maps_unlocked,
-		"maps_done": maps_done, "map_states": map_states, "played_at": Time.get_unix_time_from_system(),
+		"maps_done": maps_done, "map_states": map_states, "map_stats": map_stats,
+		"played_at": Time.get_unix_time_from_system(),
 	}))
 
 
@@ -380,6 +383,12 @@ func load_game() -> void:
 	maps_unlocked = maxi(1, _int(data.get("maps_unlocked", 1)))
 	maps_done = _dict(data.get("maps_done", {}))
 	map_states = _dict(data.get("map_states", {}))
+	var ms: Dictionary = _dict(data.get("map_stats", {}))
+	for id in ms:
+		var e: Dictionary = _dict(ms[id])
+		if e.has("first"):
+			map_stats[String(id)] = {"first": float(e.get("first", 0.0)), "best": float(e.get("best", e.get("first", 0.0))),
+				"runs": maxi(1, _int(e.get("runs", 1)))}
 	refresh_unlocked()
 
 
@@ -473,6 +482,29 @@ func vibrate(ms: int) -> void:
 	vibrations += 1
 	if OS.has_feature("mobile"):
 		Input.vibrate_handheld(ms)
+
+
+## Время выполнения цели уровня: первое прохождение, лучшее, сколько раз.
+func record_completion(id: String, seconds: float) -> void:
+	var e: Dictionary = map_stats.get(id, {})
+	if e.is_empty():
+		map_stats[id] = {"first": seconds, "best": seconds, "runs": 1}
+	else:
+		e["best"] = minf(float(e["best"]), seconds)
+		e["runs"] = int(e["runs"]) + 1
+		map_stats[id] = e
+
+
+## 17:32 или 1:05:10.
+static func fmt_time(seconds: float) -> String:
+	var s := int(seconds)
+	@warning_ignore("integer_division")
+	var h := s / 3600
+	@warning_ignore("integer_division")
+	var m := (s / 60) % 60
+	if h > 0:
+		return "%d:%02d:%02d" % [h, m, s % 60]
+	return "%d:%02d" % [m, s % 60]
 
 
 static func _dict(v) -> Dictionary:

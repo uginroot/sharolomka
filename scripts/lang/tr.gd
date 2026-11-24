@@ -181,4 +181,8 @@ const T := {
 	"%s кл": "%s kare",
 	"%s/с": "%s/sn",
 	"%s с": "%s sn",
+	"Время: %s": "Süre: %s",
+	"Пройдено за %s": "%s içinde tamamlandı",
+	"лучшее %s": "en iyi %s",
+	"сейчас %s": "şimdi %s",
 }

@@ -181,4 +181,8 @@ const T := {
 	"%s кл": "%s ô",
 	"%s/с": "%s/giây",
 	"%s с": "%s giây",
+	"Время: %s": "Thời gian: %s",
+	"Пройдено за %s": "Hoàn thành trong %s",
+	"лучшее %s": "tốt nhất %s",
+	"сейчас %s": "hiện tại %s",
 }

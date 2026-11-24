@@ -181,4 +181,8 @@ const T := {
 	"%s кл": "%s Felder",
 	"%s/с": "%s/s",
 	"%s с": "%s s",
+	"Время: %s": "Zeit: %s",
+	"Пройдено за %s": "Geschafft in %s",
+	"лучшее %s": "Bestzeit %s",
+	"сейчас %s": "jetzt %s",
 }

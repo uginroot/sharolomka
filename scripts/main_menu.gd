@@ -604,6 +604,24 @@ func _fill() -> void:
 			status += tr(" · цель выполнена")
 		info.text = status
 		tv.add_child(info)
+		# статистика: время первого прохождения, лучшее, текущее время начатого уровня
+		var parts := []
+		var stt: Dictionary = GameData.map_stats.get(mp["id"], {})
+		if not stt.is_empty():
+			parts.append(tr("Пройдено за %s") % GameData.fmt_time(stt["first"]))
+			if int(stt["runs"]) > 1:
+				parts.append(tr("лучшее %s") % GameData.fmt_time(stt["best"]))
+		var cur := _saved_time(mp)
+		if cur > 0.0:
+			parts.append(tr("сейчас %s") % GameData.fmt_time(cur))
+		var st_txt := " · ".join(parts)
+		if st_txt != "":
+			var sl := Label.new()
+			sl.theme_type_variation = "Muted"
+			sl.add_theme_color_override("font_color", GameData.C_GOLD)
+			sl.text = st_txt
+			sl.name = "Stats"
+			tv.add_child(sl)
 		var b := Button.new()
 		b.custom_minimum_size = Vector2(150, 56)
 		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -622,6 +640,12 @@ func _fill() -> void:
 	# прокручиваем к текущему уровню
 	if current_card != null:
 		_scroll_to.call_deferred(current_card)
+
+
+## Время начатого уровня (из сводки профиля; 0, если не начат).
+func _saved_time(mp: Dictionary) -> float:
+	var st = GameData.map_states.get(mp["id"], {})
+	return float(st.get("time", 0.0)) if typeof(st) == TYPE_DICTIONARY else 0.0
 
 
 func _scroll_to(card: Control) -> void:
