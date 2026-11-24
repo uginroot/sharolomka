@@ -1858,3 +1858,34 @@ func test_ball_damage_stats() -> void:
 	game = GAME.instantiate()
 	add_child(game)
 	check(game.dmg_total["splash"] == total, "итог урона не сохранился с уровнем: %d ≠ %d" % [game.dmg_total["splash"], total])
+
+
+
+## Верхняя панель неподвижна: при смене монет и U блоки не меняют ни положение, ни ширину.
+func test_top_bar_stable() -> void:
+	var g = await new_game(2)
+	var row: HBoxContainer = g.lbl_rub.get_parent().get_parent().get_parent()
+	var snap := func() -> Array:
+		var r := []
+		for c in row.get_children():
+			r.append(c.get_global_rect())
+		return r
+	var cases := [[0, 0], [7, 3], [12345, 42], [987654321, 999], [8.9e17, 1234], [3.0e18, 8888]]
+	var ref: Array = []
+	for code in ["ru", "de", "zh_CN", "ar"]:
+		GameData.lang_choice = code
+		GameData.apply_settings()
+		for cs in cases:
+			g.coins = int(cs[0])
+			g.run_u = int(cs[1])
+			g._refresh_ui()
+			await get_tree().process_frame
+			await get_tree().process_frame
+			var now: Array = snap.call()
+			if ref.is_empty() or code != "ru" and cs == cases[0]:
+				ref = now
+				continue
+			for k in now.size():
+				check(now[k].is_equal_approx(ref[k]), "%s, монеты %s, U %d: блок %d сдвинулся %s → %s" % [code, GameData.fmt(g.coins), g.run_u, k, str(ref[k]), str(now[k])])
+	GameData.lang_choice = "ru"
+	GameData.apply_settings()

@@ -524,6 +524,21 @@ func reset_all() -> void:
 
 var font: Font
 var font_bold: Font
+var font_tnum: Font           # жирный с табличными (одинаковой ширины) цифрами — для счётчиков
+
+
+## Шрифт для чисел, которые часто меняются: цифры одинаковой ширины, текст не «дышит».
+func tnum_font() -> Font:
+	if font_tnum == null:
+		# жирный Rubik — сам вариация шрифта (wght 700); вложенная вариация теряла жирность, поэтому
+		# берём исходный шрифт и задаём и толщину, и табличные цифры в одной вариации
+		var fv := FontVariation.new()
+		var ts := TextServerManager.get_primary_interface()
+		fv.base_font = font_bold.base_font if font_bold is FontVariation else font_bold
+		fv.variation_opentype = {ts.name_to_tag("wght"): 700}
+		fv.opentype_features = {ts.name_to_tag("tnum"): 1}
+		font_tnum = fv
+	return font_tnum
 var _theme: Theme
 
 const C_BG := Color(0.07, 0.08, 0.12)

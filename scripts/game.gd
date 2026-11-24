@@ -2990,7 +2990,12 @@ func _icon_rect(tex: Texture2D, sz: float) -> TextureRect:
 
 
 ## «Пилюля» со значком и числом — для монет и U.
-func _pill(tex: Texture2D, color: Color) -> Label:
+## Плашка счётчика фиксированной ширины: место под самую длинную запись числа (sample), цифры табличные —
+## при смене числа блок не меняет ни ширину, ни положение, и соседи не сдвигаются.
+const PILL_FONT := 26
+
+
+func _pill(tex: Texture2D, color: Color, sample: String = "") -> Label:
 	var p := PanelContainer.new()
 	p.theme_type_variation = "Pill"
 	var h := HBoxContainer.new()
@@ -2998,8 +3003,12 @@ func _pill(tex: Texture2D, color: Color) -> Label:
 	p.add_child(h)
 	h.add_child(_icon_rect(tex, 30))
 	var l := Label.new()
-	l.add_theme_font_override("font", GameData.font_bold)
+	l.add_theme_font_override("font", GameData.tnum_font())
+	l.add_theme_font_size_override("font_size", PILL_FONT)
 	l.add_theme_color_override("font_color", color)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if sample != "":
+		l.custom_minimum_size.x = ceilf(GameData.tnum_font().get_string_size(sample, HORIZONTAL_ALIGNMENT_LEFT, -1, PILL_FONT).x) + 2.0
 	h.add_child(l)
 	return l
 
@@ -3032,9 +3041,9 @@ func _build_ui() -> void:
 	var tr := HBoxContainer.new()
 	tr.add_theme_constant_override("separation", 8)
 	tv.add_child(tr)
-	lbl_rub = _pill(ic_coin, GameData.C_GOLD)
+	lbl_rub = _pill(ic_coin, GameData.C_GOLD, "888.8Qa")   # самая длинная запись GameData.fmt
 	tr.add_child(lbl_rub.get_parent().get_parent())
-	lbl_u = _pill(ic_gem, GameData.C_GEM)
+	lbl_u = _pill(ic_gem, GameData.C_GEM, "8888")
 	tr.add_child(lbl_u.get_parent().get_parent())
 	var pv := VBoxContainer.new()
 	pv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
