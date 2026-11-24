@@ -1163,6 +1163,8 @@ func _el(t: String, track: String) -> int:
 func _ev(t: String, track: String) -> float:
 	var d := GameData.evo_track(t, track)
 	var v := float(d["base"]) + float(d["step"]) * _el(t, track)
+	if d.has("max"):
+		v = minf(v, float(d["max"]))
 	return maxf(v, float(d["min"])) if d.has("min") else v
 
 
@@ -1176,10 +1178,19 @@ func _ladder_cost(t: String, track: String) -> int:
 
 
 func _ladder_maxed(t: String, track: String) -> bool:
-	if _el(t, track) >= GameData.LADDER_MAX:
+	var lv := _el(t, track)
+	if lv >= GameData.LADDER_MAX:
 		return true
 	var d := GameData.evo_track(t, track)
-	return d.has("min") and float(d["base"]) + float(d["step"]) * (_el(t, track) + 1) < float(d["min"]) - 0.001
+	var nxt := float(d["base"]) + float(d["step"]) * (lv + 1)
+	if d.has("min") and nxt < float(d["min"]) - 0.001:
+		return true
+	if d.has("max") and float(d["base"]) + float(d["step"]) * lv >= float(d["max"]) - 0.001:
+		return true
+	if track == "sprint_cap" and _ev(t, track) >= MAX_SPEED / maxf(1.0, _speed("sniper")) - 1.0 - 0.001:
+		return true   # разгон упирается в потолок скорости — больше предела толку нет
+	# следующий уровень не меняет то, что видит игрок, — U не списываем
+	return _ev_text(t, track, lv) == _ev_text(t, track, lv + 1)
 
 
 func _buy_evo(t: String, id: String) -> void:
@@ -2851,7 +2862,7 @@ func _fire(from = null) -> void:
 ## Купить уровень ветки за монеты. Скорость сразу меняется у летящих шаров.
 func _buy_track(t: String, id: String) -> void:
 	var c := _track_cost(t, id)
-	if coins < c or not unl[t]:
+	if coins < c or not unl[t] or _track_maxed(t, id):
 		return
 	coins -= c
 	tlvl[t][id] = _tl(t, id) + 1
@@ -3574,8 +3585,12 @@ func _refresh_ui() -> void:
 		for id in r["tracks"]:
 			var cost := _track_cost(t, id)
 			r["tracks"][id]["label"].text = _track_caption(t, id)
-			r["tracks"][id]["button"].text = GameData.fmt(cost)
-			r["tracks"][id]["button"].disabled = coins < cost
+			if _track_maxed(t, id):
+				r["tracks"][id]["button"].text = tr("макс.")
+				r["tracks"][id]["button"].disabled = true
+			else:
+				r["tracks"][id]["button"].text = GameData.fmt(cost)
+				r["tracks"][id]["button"].disabled = coins < cost
 	for t in evo_refs:
 		for eid in evo_refs[t]:
 			var er: Dictionary = evo_refs[t][eid]
@@ -3596,27 +3611,46 @@ func _refresh_ui() -> void:
 
 
 ## Подпись ветки: «Скорость 8.2 → 9.9 кл/с», «Сила удара 1 → 2», …
-func _track_caption(t: String, id: String) -> String:
-	var lv := _tl(t, id)
+## Значение ветки за монеты на уровне lv — как его видит игрок (с единицами).
+## Значение считается по-настоящему (с потолком скорости и округлением урона), а не по формуле ветки.
+func _track_text(t: String, id: String, lv: int) -> String:
+	var keep := _tl(t, id)
+	tlvl[t][id] = lv
+	var txt := id
 	match id:
 		"speed":
-			var now := _speed(t) / CELL
-			tlvl[t][id] = lv + 1
-			var nxt := _speed(t) / CELL
-			tlvl[t][id] = lv
-			return "%s: %s → %s" % [tr("Скорость"), _u_rate(_u_cells(snappedf(now, 0.1))), _u_rate(_u_cells(snappedf(nxt, 0.1)))]
+			txt = _u_rate(_u_cells(snappedf(_speed(t) / CELL, 0.1)))
 		"impact":
-			return "%s: %d → %d" % [tr("Сила удара"), _damage_of(t), _damage_of(t, lv + 1)]
+			txt = str(_damage_of(t))
 		"ticks":
-			return "%s: %d → %d" % [tr("Количество тиков"), _poison_ticks(), _poison_ticks() + 1]
+			txt = str(_poison_ticks())
 		"cadence":
-			return "%s: %s → %s" % [tr("Частота тиков яда"), _u_rate(_num(_poison_rate())), _u_rate(_num(_poison_rate() + 0.5))]
+			txt = _u_rate(_num(_poison_rate()))
 		"radius":
-			var rc := _aura_radius() / CELL
-			return "%s: %s → %s" % [tr("Радиус ауры"), _u_cells(int(rc)), _u_cells(int(rc) + 1)]
+			txt = _u_cells(int(_aura_radius() / CELL))
 		"hold":
-			return "%s: %s → %s" % [tr("Длительность бафа"), _u_sec(_aura_hold()), _u_sec(_aura_hold() + 0.5)]
-	return id
+			txt = _u_sec(_aura_hold())
+	tlvl[t][id] = keep
+	return txt
+
+
+const TRACK_NAMES := {"speed": "Скорость", "impact": "Сила удара", "ticks": "Количество тиков",
+	"cadence": "Частота тиков яда", "radius": "Радиус ауры", "hold": "Длительность бафа"}
+
+
+## Ветка на пределе: следующий уровень не меняет то, что видит игрок (например, скорость упёрлась в потолок
+## 50 кл/с) — тогда покупка недоступна и ничего не списывает (раньше деньги уходили впустую).
+func _track_maxed(t: String, id: String) -> bool:
+	var lv := _tl(t, id)
+	return _track_text(t, id, lv) == _track_text(t, id, lv + 1)
+
+
+func _track_caption(t: String, id: String) -> String:
+	var lv := _tl(t, id)
+	var name := tr(TRACK_NAMES.get(id, id))
+	if _track_maxed(t, id):
+		return "%s: %s (%s)" % [name, _track_text(t, id, lv), tr("макс.")]
+	return "%s: %s → %s" % [name, _track_text(t, id, lv), _track_text(t, id, lv + 1)]
 
 
 ## Строка бонуса стаи: ступень, что даёт сейчас, сколько шаров до следующей.

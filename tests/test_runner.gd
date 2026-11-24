@@ -1721,7 +1721,7 @@ func test_upgrade_captions_values() -> void:
 	g._show_upgrades(true)
 	g._refresh_ui()
 	var expect := {"scout_radius": "2 кл → 3 кл", "scout_find": "0% → 10%", "lightning_rate": "0.25/с → 0.5/с",
-		"shotgun_balls": "×3 → ×3", "war_banner_cry": "10 с → 9 с", "infection_fade": "−10% → −8%",
+		"shotgun_balls": "×3 → ×4", "war_banner_cry": "10 с → 9 с", "infection_fade": "−10% → −8%",
 		"sprint_rate": "1%/с → 1.5%/с", "kleshch_grip": "1/с → 1.25/с"}
 	for t in GameData.TYPE_ORDER:
 		for e in GameData.EVOS[t]:
@@ -1919,3 +1919,65 @@ func test_progress_label() -> void:
 	check(g2.lbl_prog.text.ends_with("437%") or "%" in g2.lbl_prog.text, "после цели нет процента: %s" % g2.lbl_prog.text)
 	GameData.lang_choice = "ru"
 	GameData.apply_settings()
+
+
+
+## Предел веток: следующий уровень ничего не меняет — покупка недоступна и ничего не списывает
+## (скорость упиралась в потолок 50 кл/с, а деньги уходили; скидка −50%, залп по полшара, разгон).
+func test_upgrade_caps() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	g.coins = 9_000_000_000_000_000
+	var bought := 0
+	for k in 80:
+		if g._track_maxed("sniper", "speed"):
+			break
+		g._buy_track("sniper", "speed")
+		bought += 1
+	check(g._track_maxed("sniper", "speed"), "скорость Гесиевого не дошла до предела за 80 покупок")
+	check(is_equal_approx(g._speed("sniper"), g.MAX_SPEED), "предел не равен потолку скорости")
+	var c0: int = g.coins
+	var lv0: int = g._tl("sniper", "speed")
+	g._buy_track("sniper", "speed")
+	check(g.coins == c0 and g._tl("sniper", "speed") == lv0, "на пределе покупка списала деньги")
+	var cap: String = g._track_caption("sniper", "speed")
+	check(cap.ends_with("(макс.)") and not ("→" in cap), "подпись на пределе: %s" % cap)
+	g._show_upgrades(true)
+	g._refresh_ui()
+	var btn: Button = g.shop_refs["sniper"]["tracks"]["speed"]["button"]
+	check(btn.disabled and btn.text == "макс.", "кнопка на пределе: «%s», disabled=%s" % [btn.text, btn.disabled])
+	# ни одна ветка за монеты не берёт деньги, если подпись не меняется
+	for t in GameData.TYPE_ORDER:
+		for d in GameData.TYPES[t]["tracks"]:
+			for k in 30:
+				var before: String = g._track_caption(t, d["id"])
+				var cc: int = g.coins
+				g._buy_track(t, d["id"])
+				if g.coins != cc:
+					check("→" in before, "%s/%s: списано без изменения значения: %s" % [t, d["id"], before])
+	# эволюции: скидка до −50%, залп +1 шар за уровень, U на пределе не списываются
+	g.run_u = 100000
+	g._buy_evo("sniper", "shotgun")
+	var v0: int = g._volley_size()
+	g._buy_ladder("sniper", "shotgun_balls")
+	check(g._volley_size() == v0 + 1, "уровень «Шаров в залпе» не добавил шар: %d → %d" % [v0, g._volley_size()])
+	for k in 15:
+		g._buy_ladder("sniper", "shotgun_cheap")
+	check(g._el("sniper", "shotgun_cheap") == 10 and g._ladder_maxed("sniper", "shotgun_cheap"), "скидка не остановилась на −50%%: ур. %d" % g._el("sniper", "shotgun_cheap"))
+	var u0: int = g.run_u
+	g._buy_ladder("sniper", "shotgun_cheap")
+	check(g.run_u == u0, "на пределе скидки списаны U")
+	g._buy_evo("sniper", "sprint")
+	for k in 40:
+		g._buy_ladder("sniper", "sprint_cap")
+	check(g._ladder_maxed("sniper", "sprint_cap"), "предел разгона не учитывает потолок скорости")
+	for t in GameData.TYPE_ORDER:
+		for e in GameData.EVOS[t]:
+			g._buy_evo(t, e["id"])
+			for tr_ in e["tracks"]:
+				for k in 12:
+					var before: String = g._ev_caption(t, tr_["id"])
+					var uu: int = g.run_u
+					g._buy_ladder(t, tr_["id"])
+					if g.run_u != uu:
+						check("→" in before and before.split("→")[0].strip_edges().get_slice(": ", 1) != before.split("→")[1].strip_edges(),
+							"%s: U списаны без изменения значения: %s" % [tr_["id"], before])

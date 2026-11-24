@@ -87,8 +87,8 @@ const EVOS := {
 			"tracks": [{"id": "sprint_cap", "name": "Предел разгона", "base": 0.25, "step": 0.25},
 				{"id": "sprint_rate", "name": "Темп разгона", "base": 0.01, "step": 0.005}]},
 		{"id": "shotgun", "name": "Дробовик", "desc": "Один пуск выпускает веер из нескольких шаров по цене одного.",
-			"tracks": [{"id": "shotgun_balls", "name": "Шаров в залпе", "base": 2.0, "step": 0.5},
-				{"id": "shotgun_cheap", "name": "Массовое производство", "base": 0.0, "step": 0.05}]},
+			"tracks": [{"id": "shotgun_balls", "name": "Шаров в залпе", "base": 2.0, "step": 1.0},
+				{"id": "shotgun_cheap", "name": "Массовое производство", "base": 0.0, "step": 0.05, "max": 0.5}]},
 	],
 	"splash": [
 		{"id": "lightning", "name": "Молния", "desc": "Разряды бьют всю открытую породу вокруг на четверть силы удара.",
