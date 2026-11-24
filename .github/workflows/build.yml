@@ -100,7 +100,21 @@ jobs:
           rm /tmp/tpl.tpz /tmp/godot.zip
 
       - name: Install virtual display
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libgl1-mesa-dri mesa-utils fonts-noto-core fonts-noto-cjk >/dev/null
+        # зеркало пакетов иногда «висит» (v0.28: шаг завис на 13+ минут) — таймауты на загрузку и до 3 попыток
+        timeout-minutes: 12
+        shell: bash
+        run: |
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for i in 1 2 3; do
+            if timeout 240 sudo apt-get $APT update -qq && \
+               timeout 360 sudo apt-get $APT install -y -qq --no-install-recommends \
+                 xvfb xauth libgl1-mesa-dri mesa-utils fonts-noto-core fonts-noto-cjk >/dev/null; then
+              exit 0
+            fi
+            echo "::warning::apt: попытка $i не удалась, повторяю"
+            sleep 15
+          done
+          exit 1
 
       - name: Import project
         run: ~/godot/godot --headless --path . --import || true
