@@ -2077,3 +2077,26 @@ func test_recall_button() -> void:
 	await get_tree().process_frame
 	check(g.btn_reset.text == t0 and g.btn_reset.disabled, "перезарядка: текст «%s», disabled=%s" % [g.btn_reset.text, g.btn_reset.disabled])
 	check(is_equal_approx(g.btn_reset.size.y, h0), "кнопка изменила высоту при перезарядке")
+
+
+
+## Капля Антониевого развёрнута кончиком против полёта (как шлейф Гесиевого).
+func test_drop_orientation() -> void:
+	var gg = GAME.instantiate()
+	for v in [Vector2(300, 0), Vector2(0, 300), Vector2(-200, -200), Vector2(10, -400)]:
+		var tip := Vector2(0, -1).rotated(gg._drop_rot(v))
+		check(tip.dot(-v.normalized()) > 0.999, "кончик капли не против полёта для %s: %s" % [str(v), str(tip)])
+	gg.free()
+	# в значке для интерфейса капля «летит» вправо — кончик слева: силуэт выступает от центра влево дальше, чем вправо
+	var g = await new_game(2)
+	var img: Image = g.ui_icons["poison"].get_image()
+	var w := img.get_width()
+	var minx := w
+	var maxx := 0
+	for y in img.get_height():
+		for x in w:
+			if img.get_pixel(x, y).a > 0.5:
+				minx = mini(minx, x)
+				maxx = maxi(maxx, x)
+	var h := w / 2.0
+	check(h - minx > maxx - h + 3.0, "у значка капли кончик не слева: влево %.0f, вправо %.0f" % [h - minx, maxx - h])

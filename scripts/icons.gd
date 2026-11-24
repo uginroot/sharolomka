@@ -122,19 +122,23 @@ static func ball_type(t: String, col: Color, sz: int = 96, ui: bool = false) -> 
 			Rect2(a.x - 3, a.y - 3, r * 1.3, r * 0.8))
 		_fill_ss(img, Color(1, 1, 1), func(x, y): return _in_tri(Vector2(x, y), a, b, d), Rect2(a.x, a.y, r * 1.2, r * 0.7))
 	if t == "poison":
-		# Антониевый — сам шар-капля: круглый низ и заострённый кончик вверх. Отличие — в контуре, поэтому
-		# тип читается и в мелком масштабе (белая капля внутри круга на телефоне не различалась)
-		var dc := c + Vector2(0, r * 0.22)
+		# Антониевый — сам шар-капля: круглая сторона и заострённый кончик. Отличие — в контуре, поэтому тип читается
+		# и в мелком масштабе. На поле кончик смотрит вверх, а при отрисовке текстура поворачивается кончиком против
+		# полёта (как шлейф Гесиевого); в значке для интерфейса капля «летит» вправо — кончик влево.
+		var u := Vector2(-1, 0) if ui else Vector2(0, -1)   # куда смотрит кончик
+		var v := Vector2(-u.y, u.x)
+		var dc := c - u * r * 0.22
 		var dr := r * 0.9
-		var tip := c + Vector2(0, -r * 1.38)
-		var bl := dc + Vector2(-dr * 0.78, -dr * 0.62)
-		var br := dc + Vector2(dr * 0.78, -dr * 0.62)
+		var tip := c + u * r * 1.38
+		var bl := dc + u * dr * 0.62 - v * dr * 0.78
+		var br := dc + u * dr * 0.62 + v * dr * 0.78
 		var inside := func(p: Vector2, grow: float) -> bool:
-			return p.distance_to(dc) <= dr + grow or _in_tri(p, tip + Vector2(0, -grow * 1.6), bl + Vector2(-grow, 0), br + Vector2(grow, 0))
-		var box := Rect2(c.x - r * 1.1, tip.y - 3.0, r * 2.2, dc.y + dr - tip.y + 6.0)
+			return p.distance_to(dc) <= dr + grow or _in_tri(p, tip + u * grow * 1.6, bl - v * grow, br + v * grow)
+		var box := Rect2(Vector2.ZERO, Vector2(sz, sz))
 		_fill_ss(img, Color(0.05, 0.06, 0.1, 0.85), func(x, y): return inside.call(Vector2(x, y), 1.5), box)
 		_fill_ss(img, col, func(x, y): return inside.call(Vector2(x, y), 0.0), box)
-		_disk(img, dc.x - dr * 0.34, dc.y - dr * 0.2, dr * 0.24, Color(1, 1, 1, 0.85))
+		var hl := dc + (-v * 0.34 + u * 0.2) * dr if not ui else dc + Vector2(-0.2, -0.34) * dr
+		_disk(img, hl.x, hl.y, dr * 0.24, Color(1, 1, 1, 0.85))
 		return _tex(img)
 	_disk(img, c.x, c.y, r + 1.5, Color(0.05, 0.06, 0.1, 0.85))
 	_disk(img, c.x, c.y, r, col)

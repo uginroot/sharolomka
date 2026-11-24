@@ -2239,13 +2239,24 @@ func _draw_balls() -> void:
 				ball_layer.draw_line(b.pos + back * dd * 0.45 + side, b.pos + back * dd * 1.5 + side, c1, dd * 0.2)
 				ball_layer.draw_line(b.pos + back * dd * 0.45 - side, b.pos + back * dd * 1.2 - side, c2, dd * 0.2)
 		var big := dd * Icons.BALL_K
-		ball_layer.draw_texture_rect(ball_icons[b.type], Rect2(b.pos.x - big * 0.5, b.pos.y - big * 0.5, big, big), false)
+		if b.type == "poison" and b.vel.length_squared() > 1.0:
+			# капля Антониевого — кончиком против полёта, как шлейф у Гесиевого
+			ball_layer.draw_set_transform(b.pos, _drop_rot(b.vel), Vector2.ONE)
+			ball_layer.draw_texture_rect(ball_icons[b.type], Rect2(-big * 0.5, -big * 0.5, big, big), false)
+			ball_layer.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		else:
+			ball_layer.draw_texture_rect(ball_icons[b.type], Rect2(b.pos.x - big * 0.5, b.pos.y - big * 0.5, big, big), false)
 		if b == idle_b:
 			ball_layer.draw_arc(b.pos, dd * (0.9 + 0.35 * pulse), 0.0, TAU, 28, Color(0.45, 0.85, 1.0, 0.95 - 0.5 * pulse), maxf(2.0, 3.5 / zoom))
 		if hl and b.type == highlight_type:
 			ball_layer.draw_arc(b.pos, dd * 0.85, 0.0, TAU, 24, hcol, maxf(2.0, 3.0 / zoom))
 		if b.type == "banner" and lod == 0:
 			ball_layer.draw_arc(b.pos, ar, 0.0, TAU, 40, acol, 1.5 / zoom)
+
+
+## Поворот текстуры капли: её кончик (вверх, −Y) должен смотреть против полёта.
+static func _drop_rot(vel: Vector2) -> float:
+	return (-vel).angle() + PI * 0.5
 
 
 func _hp_color(h: int) -> Color:
