@@ -2138,3 +2138,25 @@ func test_picture_maps() -> void:
 		if g2._kind_at(x, g2.H / 2) != w1[g2.W - 1 - x] and not (g2.start_cell.distance_to(Vector2i(x, g2.H / 2)) < 8):
 			mismatch += 1
 	check(mismatch == 0, "зеркальная картина не совпадает с исходной: %d клеток" % mismatch)
+
+
+
+## Заливка перезарядки «Вернуть шар» видна сразу и растёт от самого левого края.
+func test_recall_fill() -> void:
+	var g = await new_game(2)
+	g.coins = 100000
+	g._fire(g.start_pos)
+	g._refresh_ui()
+	await get_tree().process_frame
+	var w: float = g.btn_reset.size.x
+	g.reset_cd["basic"] = g.RESET_CD - 0.5   # прошло полсекунды
+	g._refresh_ui()
+	check(g.reset_fill.visible and g.reset_fill.position.x == 0.0, "заливка не видна с первых секунд или не от края")
+	check(g.reset_fill.size.x > 0.0 and g.reset_fill.size.x < w * 0.05, "ширина заливки через 0.5 с: %.1f из %.0f" % [g.reset_fill.size.x, w])
+	check(is_equal_approx(g.reset_fill_panel.size.x, w), "плашка внутри не размером с кнопку")
+	g.reset_cd["basic"] = g.RESET_CD * 0.5
+	g._refresh_ui()
+	check(absf(g.reset_fill.size.x - w * 0.5) < 1.0, "на середине перезарядки заливка %.0f из %.0f" % [g.reset_fill.size.x, w])
+	g.reset_cd["basic"] = 0.0
+	g._refresh_ui()
+	check(not g.reset_fill.visible, "после перезарядки заливка не скрылась")

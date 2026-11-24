@@ -187,6 +187,7 @@ var chip_group := ButtonGroup.new()
 var chips := {}
 var btn_reset: Button
 var reset_fill: Control
+var reset_fill_panel: Panel
 const ROW_FONT := 23
 var upg: Control
 var upg_margin: MarginContainer
@@ -3182,11 +3183,17 @@ func _build_ui() -> void:
 	btn_reset.toggle_mode = true
 	btn_reset.pressed.connect(_reset_stuck)
 	# перезарядка «Вернуть шар»: фон кнопки заполняется слева направо
+	# «окно» растущей ширины (обрезает содержимое) с плашкой во весь размер кнопки внутри: заливка видна сразу,
+	# от самого левого края, со скруглением как у кнопки (раньше появлялась лишь через ~5 с и с отступа)
 	reset_fill = Control.new()
 	reset_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	reset_fill.set_anchors_preset(Control.PRESET_FULL_RECT)
-	reset_fill.draw.connect(_draw_reset_fill)
+	reset_fill.clip_contents = true
+	reset_fill.anchor_bottom = 1.0
 	btn_reset.add_child(reset_fill)
+	reset_fill_panel = Panel.new()
+	reset_fill_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	reset_fill.add_child(reset_fill_panel)
+	btn_reset.resized.connect(_layout_reset_fill)
 	for bb in [bup, btn_snap, btn_reset]:
 		bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		bb.custom_minimum_size.x = 0
@@ -3630,19 +3637,22 @@ func _fit_button_text(bb: Button) -> void:
 
 
 ## Перезарядка «Вернуть шар»: доля прошедшего времени — полупрозрачная заливка слева направо.
-func _draw_reset_fill() -> void:
-	var cd: float = reset_cd.get(selected, 0.0)
-	if cd <= 0.0 or reset_armed:
+## Плашка внутри всегда размером с кнопку (скругление как у кнопки), а «окно» обрезает её по доле.
+func _layout_reset_fill() -> void:
+	if reset_fill == null:
 		return
-	var done := clampf(1.0 - cd / RESET_CD, 0.0, 1.0)
-	var sz := reset_fill.size
+	var sz := btn_reset.size
+	reset_fill_panel.size = sz
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.45, 0.85, 1.0, 0.3)
 	var base := btn_reset.get_theme_stylebox("disabled")
-	var rad: int = base.corner_radius_top_left if base is StyleBoxFlat else 12
-	sb.set_corner_radius_all(rad)   # скругление как у кнопки — без торчащих прямых углов
-	if sz.x * done >= rad * 2.0:
-		reset_fill.draw_style_box(sb, Rect2(Vector2.ZERO, Vector2(sz.x * done, sz.y)))
+	sb.set_corner_radius_all(base.corner_radius_top_left if base is StyleBoxFlat else 12)
+	reset_fill_panel.add_theme_stylebox_override("panel", sb)
+	var cd: float = reset_cd.get(selected, 0.0)
+	var done := 0.0 if (cd <= 0.0 or reset_armed) else clampf(1.0 - cd / RESET_CD, 0.0, 1.0)
+	reset_fill.position = Vector2.ZERO
+	reset_fill.size = Vector2(sz.x * done, sz.y)
+	reset_fill.visible = done > 0.0
 
 
 func _refresh_ui() -> void:
@@ -3673,12 +3683,11 @@ func _refresh_ui() -> void:
 		chips[t].modulate = Color(1, 1, 1, 1.0 if coins >= price else 0.6)
 	var cd: float = reset_cd[selected]
 	# надпись не меняется — состояние показывает оформление: включено — акцентная заливка,
-	# перезарядка — фон заполняется слева направо (_draw_reset_fill)
+	# перезарядка — фон заполняется слева направо (_layout_reset_fill)
 	btn_reset.theme_type_variation = "AccentButton" if reset_armed else "ChipButton"
 	btn_reset.set_pressed_no_signal(reset_armed)
 	btn_reset.disabled = not reset_armed and (cd > 0.0 or int(counts[selected]) == 0)
-	if reset_fill != null:
-		reset_fill.queue_redraw()
+	_layout_reset_fill()
 
 	if not upg.visible:
 		return
