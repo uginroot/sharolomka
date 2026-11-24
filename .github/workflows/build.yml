@@ -99,16 +99,28 @@ jobs:
             -d "$T"
           rm /tmp/tpl.tpz /tmp/godot.zip
 
+      - name: Cache apt packages
+        uses: actions/cache@v6
+        with:
+          path: ~/apt-cache
+          key: apt-ui-${{ runner.os }}-v1
+
       - name: Install virtual display
-        # зеркало пакетов иногда «висит» (v0.28: шаг завис на 13+ минут) — таймауты на загрузку и до 3 попыток
+        # зеркало пакетов иногда «висит» (v0.28–v0.31): сначала ставим из кэша .deb без сети,
+        # иначе — apt с таймаутами и до 3 попыток (скачанное попадает в кэш для следующих прогонов)
         timeout-minutes: 12
         shell: bash
         run: |
-          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          PKGS="xvfb xauth libgl1-mesa-dri mesa-utils fonts-noto-core fonts-noto-cjk"
+          mkdir -p ~/apt-cache/partial
+          if ls ~/apt-cache/*.deb >/dev/null 2>&1 && sudo dpkg -i ~/apt-cache/*.deb >/dev/null 2>&1 && command -v xvfb-run >/dev/null; then
+            echo "пакеты поставлены из кэша"; exit 0
+          fi
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Dir::Cache::Archives=$HOME/apt-cache -o APT::Keep-Downloaded-Packages=true"
           for i in 1 2 3; do
             if timeout 240 sudo apt-get $APT update -qq && \
-               timeout 360 sudo apt-get $APT install -y -qq --no-install-recommends \
-                 xvfb xauth libgl1-mesa-dri mesa-utils fonts-noto-core fonts-noto-cjk >/dev/null; then
+               timeout 360 sudo apt-get $APT install -y -qq --no-install-recommends $PKGS >/dev/null; then
+              sudo chown -R "$USER" ~/apt-cache; rm -rf ~/apt-cache/partial ~/apt-cache/lock
               exit 0
             fi
             echo "::warning::apt: попытка $i не удалась, повторяю"
