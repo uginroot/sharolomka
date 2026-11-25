@@ -3396,6 +3396,7 @@ func _build_ui() -> void:
 	var bclose := _button(tr("Вернуться к игре"), "AccentButton", 60)
 	bclose.pressed.connect(_show_upgrades.bind(false))
 	uv.add_child(bclose)
+	uv.move_child(upg_tab_box, bclose.get_index() - 1)   # вкладки шаров — внизу, под большим пальцем, над «Вернуться к игре»
 
 	toast_label = _label("")
 	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -3682,19 +3683,33 @@ func _upg_row(parent: VBoxContainer, name: String, icon: Texture2D, cb: Callable
 ## Эволюции шара — в его же карточке, под прокачкой за монеты. Купленная: заголовок с ✓ и строки веток
 ## (значение и кнопка ◆), некупленная: название, короткое описание и кнопка ◆ цены.
 func _build_evo_section(cv: VBoxContainer, t: String) -> void:
-	var sep := HSeparator.new()
-	sep.modulate = Color(1, 1, 1, 0.35)
-	cv.add_child(sep)
 	var hd := _label(tr("  Эволюции  ").strip_edges(), "Muted")
 	hd.add_theme_font_override("font", GameData.font_bold)
 	cv.add_child(hd)
 	var refs := {}
 	for e in GameData.EVOS[t]:
 		var eid: String = e["id"]
+		# каждая эволюция — на своей подложке: отделена от соседней и от улучшений за монеты
+		var pan := PanelContainer.new()
+		var psb := StyleBoxFlat.new()
+		psb.bg_color = Color(1, 1, 1, 0.05)
+		psb.border_color = Color(1, 1, 1, 0.08)
+		psb.set_border_width_all(1)
+		psb.set_corner_radius_all(12)
+		psb.content_margin_left = 12
+		psb.content_margin_right = 10
+		psb.content_margin_top = 8
+		psb.content_margin_bottom = 8
+		pan.add_theme_stylebox_override("panel", psb)
+		pan.name = "Evo_" + eid
+		cv.add_child(pan)
+		var ev := VBoxContainer.new()
+		ev.add_theme_constant_override("separation", 6)
+		pan.add_child(ev)
 		if not _has_evo(t, eid):
 			var row := HBoxContainer.new()
 			row.add_theme_constant_override("separation", 8)
-			cv.add_child(row)
+			ev.add_child(row)
 			var tv := VBoxContainer.new()
 			tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			tv.add_theme_constant_override("separation", 2)
@@ -3712,13 +3727,14 @@ func _build_evo_section(cv: VBoxContainer, t: String) -> void:
 			row.add_child(bb)
 			refs[eid] = {"buy": bb}
 			continue
+		psb.border_color = Color(0.55, 0.9, 0.65, 0.35)   # купленная — с зеленоватой рамкой
 		var nm2 := _label(tr(e["name"]) + "  ✓", "")
 		nm2.add_theme_font_override("font", GameData.font_bold)
 		nm2.add_theme_color_override("font_color", Color(0.55, 0.9, 0.65))
-		cv.add_child(nm2)
+		ev.add_child(nm2)
 		var ladders := {}
 		for tr_ in e["tracks"]:
-			ladders[tr_["id"]] = _upg_row(cv, tr(tr_["name"]), ic_gem, _buy_ladder.bind(t, tr_["id"]))
+			ladders[tr_["id"]] = _upg_row(ev, tr(tr_["name"]), ic_gem, _buy_ladder.bind(t, tr_["id"]))
 		refs[eid] = {"ladders": ladders}
 	evo_refs[t] = refs
 

@@ -2224,6 +2224,18 @@ func test_upgrade_tabs() -> void:
 	check(g._affordable("basic") == 2 + 2, "у Пронизывающего доступно %d (2 ветки за монеты + 2 эволюции)" % g._affordable("basic"))
 	g._open_upg_tab("splash")
 	check(g.shop_refs["splash"]["card"].visible and not g.shop_refs["basic"]["card"].visible, "вкладка не переключила карточку")
+	# вкладки шаров — внизу (над «Вернуться к игре»), каждая эволюция — на своей подложке
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check(g.upg_tab_box.get_global_rect().position.y > g.upg_scroll.get_global_rect().position.y, "вкладки шаров не внизу")
+	var row: VBoxContainer = g.upg_tab_box.get_parent()
+	var last: Control = row.get_child(row.get_child_count() - 1)
+	check(last is Button and g.upg_tab_box.get_index() == last.get_index() - 1, "вкладки шаров не прямо над «Вернуться к игре»")
+	var eb: Button = g.evo_refs["basic"]["stitch"]["buy"]
+	var pan := eb.get_parent()
+	while pan != null and not (pan is PanelContainer):
+		pan = pan.get_parent()
+	check(pan != null and String(pan.name).begins_with("Evo_"), "эволюция не на своей подложке")
 	check(g._arrow("8.3 кл/с", "9.9 кл/с") == "8.3 → 9.9 кл/с" and g._arrow("10%", "20%") == "10 → 20%" and g._arrow("×3", "×4") == "×3 → ×4" \
 		and g._arrow("−10%", "−8%") == "−10 → −8%", "_arrow: %s | %s" % [g._arrow("8.3 кл/с", "9.9 кл/с"), g._arrow("×3", "×4")])
 	# строка ветки — значение без названия и без повторов единиц
