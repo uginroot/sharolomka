@@ -3592,26 +3592,11 @@ func _rebuild_rows() -> void:
 		cv.add_theme_constant_override("separation", 8)
 		card.add_child(cv)
 		var stat := _card_head(cv, t, not unlocked)
-		# описание — в одну строку, полный текст по «i»
-		var dr := HBoxContainer.new()
-		dr.add_theme_constant_override("separation", 6)
-		cv.add_child(dr)
+		# описание шара — всегда целиком
 		var sd := _label(tr(def["desc"]), "Muted")
-		sd.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		if unlocked:
-			sd.clip_text = true
-			sd.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-			var ib := _button("i", "", 40)
-			ib.custom_minimum_size.x = 40
-			ib.toggle_mode = true
-			ib.toggled.connect(func(on):
-				sd.clip_text = not on
-				sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if on else TextServer.AUTOWRAP_OFF)
-			dr.add_child(sd)
-			dr.add_child(ib)
-		else:
-			sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			dr.add_child(sd)
+		sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sd.name = "Desc"
+		cv.add_child(sd)
 		if unlocked:
 			# бонус стаи — полоской: ступень, прогресс до следующей, что даёт сейчас
 			var fr := HBoxContainer.new()
@@ -3732,6 +3717,10 @@ func _build_evo_section(cv: VBoxContainer, t: String) -> void:
 		nm2.add_theme_font_override("font", GameData.font_bold)
 		nm2.add_theme_color_override("font_color", Color(0.55, 0.9, 0.65))
 		ev.add_child(nm2)
+		var ds2 := _label(tr(e["desc"]), "Muted")   # описание остаётся и после покупки
+		ds2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		ds2.name = "EvoDesc"
+		ev.add_child(ds2)
 		var ladders := {}
 		for tr_ in e["tracks"]:
 			ladders[tr_["id"]] = _upg_row(ev, tr(tr_["name"]), ic_gem, _buy_ladder.bind(t, tr_["id"]))

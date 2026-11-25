@@ -2245,5 +2245,12 @@ func test_upgrade_tabs() -> void:
 	check(g.evo_refs["basic"]["scout"]["buy"].icon == g.ic_gem, "у некупленной эволюции нет кнопки ◆")
 	g._buy_evo("basic", "scout")
 	g._refresh_ui()
+	# описания: у шара — всегда целиком, у эволюции — и после покупки
+	var sd: Label = g.shop_refs["basic"]["card"].find_child("Desc", true, false)
+	check(sd != null and sd.autowrap_mode != TextServer.AUTOWRAP_OFF and not sd.clip_text and sd.text == tr(GameData.TYPES["basic"]["desc"]),
+		"описание шара не видно целиком")
+	var epan: Node = g.shop_refs["basic"]["card"].find_child("Evo_scout", true, false)
+	var ed: Label = epan.find_child("EvoDesc", true, false) if epan else null
+	check(ed != null and ed.text == tr(GameData.evo_def("basic", "scout")["desc"]), "у купленной эволюции нет описания")
 	var lr: Dictionary = g.evo_refs["basic"]["scout"]["ladders"]["scout_radius"]
 	check(lr["button"].icon == g.ic_gem and lr["button"].text == "1" and lr["label"].text == "2 → 3 кл", "строка ветки эволюции: «%s» [%s]" % [lr["label"].text, lr["button"].text])
