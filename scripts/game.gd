@@ -68,7 +68,7 @@ var frenzy_time := FRENZY_TIME
 var dmg_total := {}              # статистика шаров уровня: тип → весь нанесённый урон
 var dmg_win := {}                # тип → урон по секундам за последние 10 с (кольцо из 10 корзин)
 var dmg_sec := 0                 # секунда игрового времени, до которой корзины актуальны
-const DPS_WINDOW := 10
+const DPS_WINDOW := 60            # окно среднего урона в секунду, с (было 10 — значение сильно прыгало)
 var play_time := 0.0             # сколько игрок играет этот уровень (только пока игра открыта), с
 var coin_acc := 0.0              # дробная часть монет при бонусе
 var coin_mult := 1.0
@@ -1972,7 +1972,7 @@ func _advance_dps() -> void:
 			dmg_win[t] = wb
 
 
-## Средний урон в секунду за последние 10 с (в начале уровня — за прошедшее время).
+## Средний урон в секунду за последние DPS_WINDOW секунд (в начале уровня — за прошедшее время).
 func _dps(t: String) -> float:
 	_advance_dps()
 	var sum := 0.0
@@ -3473,12 +3473,10 @@ func _card_head(parent: VBoxContainer, t: String, locked: bool) -> Label:
 	h.add_child(_icon_rect(ui_icons[t] if not locked else Icons.lock(40), 40 if not locked else 32))
 	var n := _label(tr(def["name"]), "Title")
 	h.add_child(n)
-	var stat := _label("", "Muted")   # урон за уровень · в секунду за 10 с
-	stat.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stat.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	stat.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
-	h.add_child(stat)
-	return stat
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(sp)
+	return null
 
 
 func _rebuild_rows() -> void:
@@ -3591,7 +3589,7 @@ func _rebuild_rows() -> void:
 		var cv := VBoxContainer.new()
 		cv.add_theme_constant_override("separation", 8)
 		card.add_child(cv)
-		var stat := _card_head(cv, t, not unlocked)
+		_card_head(cv, t, not unlocked)
 		# описание шара — всегда целиком
 		var sd := _label(tr(def["desc"]), "Muted")
 		sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -3623,16 +3621,18 @@ func _rebuild_rows() -> void:
 			fr.add_child(fb)
 			var fe := _label("", "Muted")
 			fr.add_child(fe)
+			var st := _stats_panel(cv)
 			var trs := {}
 			for tr_ in def["tracks"]:
 				trs[tr_["id"]] = _upg_row(cv, tr(TRACK_NAMES.get(tr_["id"], tr_["id"])), ic_coin, _buy_track.bind(t, tr_["id"]))
-			shop_refs[t] = {"card": card, "fleet": fl, "fleet_bar": fb, "fleet_eff": fe, "tracks": trs, "stat": stat}
+			shop_refs[t] = {"card": card, "fleet": fl, "fleet_bar": fb, "fleet_eff": fe, "tracks": trs,
+				"stat": st["total"], "stat_dps": st["dps"], "stat_ball": st["ball"]}
 			_build_evo_section(cv, t)
 		else:
 			var ub := _button(tr("Открыть · 1 U"), "AccentButton", 62, ic_gem)
 			ub.pressed.connect(_unlock_type.bind(t))
 			cv.add_child(ub)
-			shop_refs[t] = {"card": card, "unlock": ub, "stat": stat}
+			shop_refs[t] = {"card": card, "unlock": ub}
 	_refresh_ui()
 
 
@@ -3645,6 +3645,43 @@ static func _arrow(a: String, b: String) -> String:
 	if unit.strip_edges() != "" and b.ends_with(unit) and i > 0:
 		return "%s → %s" % [a.substr(0, i), b]
 	return "%s → %s" % [a, b]
+
+
+## Статистика шара на своей подложке: урон за уровень, урон в секунду (за 60 с), на один шар.
+func _stats_panel(cv: VBoxContainer) -> Dictionary:
+	var pan := PanelContainer.new()
+	var psb := StyleBoxFlat.new()
+	psb.bg_color = Color(0.45, 0.6, 1.0, 0.07)
+	psb.set_corner_radius_all(12)
+	psb.content_margin_left = 12
+	psb.content_margin_right = 12
+	psb.content_margin_top = 6
+	psb.content_margin_bottom = 6
+	pan.add_theme_stylebox_override("panel", psb)
+	pan.name = "Stats"
+	cv.add_child(pan)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 2)
+	pan.add_child(v)
+	var out := {}
+	for k in [["total", tr("Урон за уровень")], ["dps", tr("Урон в секунду (за 60 с)")], ["ball", tr("На один шар")]]:
+		var row := HBoxContainer.new()
+		v.add_child(row)
+		var nl := _label(k[1], "Muted")
+		nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(nl)
+		var vl := _label("", "")
+		vl.add_theme_font_override("font", GameData.font_bold)
+		vl.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+		vl.text_direction = Control.TEXT_DIRECTION_LTR
+		row.add_child(vl)
+		out[k[0]] = vl
+	return out
+
+
+## Число в секунду для статистики: до 100 — с одним знаком, дальше — коротко (12.3K).
+func _rate_text(v: float) -> String:
+	return _u_rate(_num(snappedf(v, 0.1)) if v < 100.0 else GameData.fmt(int(v)))
 
 
 ## Строка улучшения: название, значение «сейчас → после» и кнопка цены (монеты или U) — одна строка.
@@ -3929,7 +3966,10 @@ func _refresh_ui() -> void:
 			r["unlock"].disabled = run_u < 1
 			continue
 		var dps := _dps(t)
-		r["stat"].text = "%s · %s" % [GameData.fmt(dmg_total[t]), _u_rate(_num(snappedf(dps, 0.1)) if dps < 100.0 else GameData.fmt(int(dps)))]
+		var nb := maxi(1, int(counts[t]) + int(extra[t]))
+		r["stat"].text = GameData.fmt(dmg_total[t])
+		r["stat_dps"].text = _rate_text(dps)
+		r["stat_ball"].text = _rate_text(dps / nb)
 		var fp := _fleet_parts(t)
 		r["fleet"].text = tr("Стая %d/9") % fp[0]
 		r["fleet_bar"].value = fp[1]

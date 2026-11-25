@@ -1807,13 +1807,13 @@ func test_ball_damage_stats() -> void:
 	g._damage(id, 30, rb)
 	g._damage(id, 10, bb)
 	check(g.dmg_total["splash"] == 30 and g.dmg_total["basic"] == 10, "урон не засчитан типам: %s" % str(g.dmg_total))
-	check(is_equal_approx(g._dps("splash"), 3.0), "среднее за 10 с: %.2f, а не 3" % g._dps("splash"))
+	check(is_equal_approx(g._dps("splash"), 0.5), "среднее за 60 с: %.2f, а не 0.5" % g._dps("splash"))
 	g.time_acc = 105.5
 	g._damage(id, 20, rb)
-	check(is_equal_approx(g._dps("splash"), 5.0), "среднее за 10 с после второго удара: %.2f" % g._dps("splash"))
-	g.time_acc = 111.2   # первая секунда (100) выпала из окна
-	check(is_equal_approx(g._dps("splash"), 2.0), "устаревший урон не выпал из окна: %.2f" % g._dps("splash"))
-	g.time_acc = 130.0
+	check(is_equal_approx(g._dps("splash"), 50.0 / 60.0), "среднее за 60 с после второго удара: %.2f" % g._dps("splash"))
+	g.time_acc = 161.2   # первая секунда (100) выпала из окна в 60 с
+	check(is_equal_approx(g._dps("splash"), 20.0 / 60.0), "устаревший урон не выпал из окна: %.2f" % g._dps("splash"))
+	g.time_acc = 200.0
 	check(g._dps("splash") == 0.0 and g.dmg_total["splash"] == 50, "окно не обнулилось или потерян итог")
 	# яд засчитывается Антониевому
 	g._spawn_ball("poison", 0.0, g.start_pos)
@@ -1825,7 +1825,11 @@ func test_ball_damage_stats() -> void:
 	g._show_upgrades(true)
 	g._refresh_ui()
 	var total: int = g.dmg_total["splash"]   # шары продолжали летать, пока шёл яд, — урон мог вырасти
-	check(g.shop_refs["splash"]["stat"].text.begins_with(GameData.fmt(total) + " · "), "статистика в заголовке карточки: %s" % g.shop_refs["splash"]["stat"].text)
+	check(g.shop_refs["splash"]["stat"].text == GameData.fmt(total), "урон за уровень в статистике: %s" % g.shop_refs["splash"]["stat"].text)
+	# на один шар — урон в секунду, делённый на число шаров типа
+	var nb: int = maxi(1, int(g.counts["splash"]) + int(g.extra["splash"]))
+	check(g.shop_refs["splash"]["stat_ball"].text == g._rate_text(g._dps("splash") / nb), "на один шар: %s" % g.shop_refs["splash"]["stat_ball"].text)
+	check(g.shop_refs["splash"]["card"].find_child("Stats", true, false) != null, "нет блока статистики на подложке")
 	g._save_state()
 	game.queue_free()
 	game = null

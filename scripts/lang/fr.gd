@@ -181,4 +181,7 @@ const T := {
 	"Поле и техника": "Machines agricoles",
 	"Расчистите карту целиком — ещё +%d ★": "Dégagez toute la carte : encore +%d ★",
 	"Стая %d/9": "Meute %d/9",
+	"Урон за уровень": "Dégâts du niveau",
+	"Урон в секунду (за 60 с)": "Dégâts par seconde (60 s)",
+	"На один шар": "Par balle",
 }

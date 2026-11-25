@@ -181,4 +181,7 @@ const T := {
 	"Поле и техника": "Tarım Makineleri",
 	"Расчистите карту целиком — ещё +%d ★": "Haritanın tamamını temizle — +%d ★ daha",
 	"Стая %d/9": "Sürü %d/9",
+	"Урон за уровень": "Bu bölümdeki hasar",
+	"Урон в секунду (за 60 с)": "Saniyede hasar (60 sn)",
+	"На один шар": "Top başına",
 }

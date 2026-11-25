@@ -181,4 +181,7 @@ const T := {
 	"Поле и техника": "Landtechnik",
 	"Расчистите карту целиком — ещё +%d ★": "Räume die ganze Karte frei — noch +%d ★",
 	"Стая %d/9": "Schwarm %d/9",
+	"Урон за уровень": "Schaden im Level",
+	"Урон в секунду (за 60 с)": "Schaden pro Sekunde (60 s)",
+	"На один шар": "Pro Kugel",
 }

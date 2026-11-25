@@ -181,4 +181,7 @@ const T := {
 	"Поле и техника": "Mesin Pertanian",
 	"Расчистите карту целиком — ещё +%d ★": "Bersihkan seluruh peta — tambah +%d ★",
 	"Стая %d/9": "Kawanan %d/9",
+	"Урон за уровень": "Kerusakan di level",
+	"Урон в секунду (за 60 с)": "Kerusakan per detik (60 dtk)",
+	"На один шар": "Per bola",
 }
