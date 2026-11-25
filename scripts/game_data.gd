@@ -180,15 +180,46 @@ const SETTINGS_PATH := "user://settings.json"
 ## «Наследие» — постоянные улучшения за ★. Ветки — цепочки: узел требует предыдущий (req).
 ## max 0 — без предела; цена = cost + step·уровень.
 const META := [
-	{"id": "coin_bonus", "branch": "Казна", "name": "Бонус монет", "desc": "+10% монет", "max": 0, "cost": 1, "step": 1, "req": ""},
-	{"id": "start_coins", "branch": "Казна", "name": "Стартовые монеты", "desc": "Монеты на старте уровня", "max": 5, "cost": 2, "step": 1, "req": "coin_bonus"},
-	{"id": "dmg_bonus", "branch": "Сила", "name": "Урон", "desc": "+10% урона всех шаров", "max": 0, "cost": 1, "step": 1, "req": ""},
-	{"id": "frenzy", "branch": "Сила", "name": "Золотая лихорадка", "desc": "+3 с лихорадки", "max": 5, "cost": 2, "step": 1, "req": "dmg_bonus"},
-	{"id": "u_find", "branch": "Удача", "name": "Поиск U", "desc": "+20% U-баллов", "max": 5, "cost": 2, "step": 1, "req": ""},
-	{"id": "start_u", "branch": "Удача", "name": "Стартовые U", "desc": "+1 U на старте уровня", "max": 5, "cost": 2, "step": 1, "req": "u_find"},
-	{"id": "start_balls", "branch": "Старт", "name": "Стартовые шары", "desc": "+1 бесплатный шар на старте", "max": 5, "cost": 3, "step": 1, "req": ""},
-	{"id": "gold", "branch": "Старт", "name": "Золотые квадраты", "desc": "+20% золотых квадратов", "max": 5, "cost": 2, "step": 1, "req": "start_balls"},
+	{"id": "coin_bonus", "branch": "Казна", "name": "Бонус монет", "desc": "Все монеты за разбитые квадраты увеличиваются.",
+		"value": "Монеты", "max": 0, "cost": 1, "step": 1, "req": ""},
+	{"id": "start_coins", "branch": "Казна", "name": "Стартовые монеты", "desc": "С этими монетами начинается каждый уровень — можно сразу купить шары и улучшения.",
+		"value": "Монет на старте", "max": 5, "cost": 2, "step": 1, "req": "coin_bonus"},
+	{"id": "dmg_bonus", "branch": "Сила", "name": "Урон", "desc": "Урон всех шаров на всех уровнях.",
+		"value": "Урон шаров", "max": 0, "cost": 1, "step": 1, "req": ""},
+	{"id": "frenzy", "branch": "Сила", "name": "Золотая лихорадка", "desc": "Золотой квадрат включает урон ×2 на время; улучшение продлевает его.",
+		"value": "Длительность", "max": 5, "cost": 2, "step": 1, "req": "dmg_bonus"},
+	{"id": "u_find", "branch": "Удача", "name": "Поиск U", "desc": "U-баллы чаще находятся в квадратах.",
+		"value": "Находка U", "max": 5, "cost": 2, "step": 1, "req": ""},
+	{"id": "start_u", "branch": "Удача", "name": "Стартовые U", "desc": "U-баллы на старте каждого уровня — сразу открыть шар или эволюцию.",
+		"value": "U на старте", "max": 5, "cost": 2, "step": 1, "req": "u_find"},
+	{"id": "start_balls", "branch": "Старт", "name": "Стартовые шары", "desc": "Бесплатные шары «Пронизывающий» на старте уровня.",
+		"value": "Шаров на старте", "max": 5, "cost": 3, "step": 1, "req": ""},
+	{"id": "gold", "branch": "Старт", "name": "Золотые квадраты", "desc": "Чаще попадаются золотые квадраты, которые включают лихорадку.",
+		"value": "Частота", "max": 5, "cost": 2, "step": 1, "req": "start_balls"},
 ]
+const META_BRANCH_DESC := {"Казна": "Монеты на всех уровнях", "Сила": "Урон и золотая лихорадка",
+	"Удача": "U-баллы для открытий и эволюций", "Старт": "С чем начинается каждый уровень"}
+
+
+## Значение улучшения «Наследия» на уровне lv — как его видит игрок (с единицами).
+func meta_value(id: String, lv: int) -> String:
+	match id:
+		"coin_bonus", "dmg_bonus":
+			return "+%d%%" % (10 * lv)
+		"start_coins":
+			return fmt(0 if lv == 0 else int(30 * pow(3, lv)))
+		"frenzy":
+			return tr("%s с") % str(15 + 3 * lv)
+		"u_find":
+			return "+%d%%" % (20 * lv)
+		"start_u":
+			return str(lv)
+		"start_balls":
+			return str(1 + lv)
+		"gold":
+			var p := 0.3 * (1.0 + 0.2 * lv)
+			return ("%.2f" % p).rstrip("0").rstrip(".") + "%"
+	return str(lv)
 const META_BRANCHES := ["Казна", "Сила", "Удача", "Старт"]
 ## «Арсенал» (открытие типов за ★) убран в v0.26: типы открываются внутри уровня за 1 U, как в pixel-rikoshet.
 ## Потраченные на него ★ возвращаются при загрузке (принцип «за убранное возвращаем ресурс»).

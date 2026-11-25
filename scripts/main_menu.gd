@@ -223,10 +223,17 @@ func _show_screen(name: String) -> void:
 
 
 ## «Наследие»: ветки — цепочки узлов слева направо (каждый требует предыдущий).
+## «Наследие» — по образцу прокачки: ветки карточками, каждое улучшение на своей подложке — название и уровень,
+## описание, строка «значение: сейчас → после покупки» и кнопка ★ (яркая, если хватает звёзд).
 func _fill_legacy() -> void:
 	for c in legacy_box.get_children():
 		c.queue_free()
 	legacy_stars.text = "★ %d" % GameData.stars
+	var intro := Label.new()
+	intro.text = tr("★ даются за цели уровней и за полную расчистку больших карт. Улучшения «Наследия» действуют на всех уровнях.")
+	intro.theme_type_variation = "Muted"
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	legacy_box.add_child(intro)
 	for br in GameData.META_BRANCHES:
 		var card := PanelContainer.new()
 		card.theme_type_variation = "Card"
@@ -238,43 +245,91 @@ func _fill_legacy() -> void:
 		bt.text = tr(br)
 		bt.theme_type_variation = "Title"
 		v.add_child(bt)
-		for m in GameData.META:
-			if m["branch"] != br:
-				continue
-			var id: String = m["id"]
-			var row := HBoxContainer.new()
-			row.add_theme_constant_override("separation", 10)
-			v.add_child(row)
-			var tv := VBoxContainer.new()
-			tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			row.add_child(tv)
-			var nm := Label.new()
-			var lv := GameData.meta_level(id)
-			var is_type: bool = GameData.TYPES.has(id)
-			nm.text = (("↳ " if String(m["req"]) != "" else "") +
-				(tr("Открыть: %s") % tr(GameData.TYPES[id]["name"]) if is_type else tr(m["name"])))
-			nm.add_theme_font_override("font", GameData.font_bold)
-			tv.add_child(nm)
-			if not is_type:
-				var ds := Label.new()
-				ds.theme_type_variation = "Muted"
-				var mx: int = int(m["max"])
-				ds.text = "%s · %d%s" % [tr(m["desc"]), lv, ("/%d" % mx) if mx > 0 else ""]
-				tv.add_child(ds)
-			var b := Button.new()
-			b.custom_minimum_size = Vector2(130, 50)
-			b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			var maxed: bool = int(m["max"]) > 0 and lv >= int(m["max"])
-			if maxed:
-				b.text = "✓" if is_type else tr("макс.")
-				b.disabled = true
-			else:
-				b.text = "★ %d" % GameData.meta_cost(id)
-				b.disabled = not GameData.meta_can_buy(id)
-				if not b.disabled:
-					b.theme_type_variation = "AccentButton"
-			b.pressed.connect(_buy_meta.bind(id))
-			row.add_child(b)
+		var bd := Label.new()
+		bd.text = tr(GameData.META_BRANCH_DESC[br])
+		bd.theme_type_variation = "Muted"
+		v.add_child(bd)
+		for md in GameData.META:
+			if md["branch"] == br:
+				v.add_child(_meta_panel(md))
+
+
+func _meta_panel(md: Dictionary) -> Control:
+	var id: String = md["id"]
+	var lv := GameData.meta_level(id)
+	var mx := int(md["max"])
+	var req := String(md["req"])
+	var locked := req != "" and GameData.meta_level(req) <= 0
+	var maxed := mx > 0 and lv >= mx
+	var wrap := MarginContainer.new()
+	wrap.add_theme_constant_override("margin_left", 22 if req != "" else 0)   # зависимое — с отступом
+	var pan := PanelContainer.new()
+	var psb := StyleBoxFlat.new()
+	psb.bg_color = Color(1, 1, 1, 0.05)
+	psb.border_color = Color(0.55, 0.9, 0.65, 0.35) if lv > 0 else Color(1, 1, 1, 0.08)
+	psb.set_border_width_all(1)
+	psb.set_corner_radius_all(12)
+	psb.content_margin_left = 12
+	psb.content_margin_right = 10
+	psb.content_margin_top = 8
+	psb.content_margin_bottom = 8
+	pan.add_theme_stylebox_override("panel", psb)
+	pan.name = "Meta_" + id
+	wrap.add_child(pan)
+	var ev := VBoxContainer.new()
+	ev.add_theme_constant_override("separation", 4)
+	pan.add_child(ev)
+	var top := HBoxContainer.new()
+	ev.add_child(top)
+	var nm := Label.new()
+	nm.text = ("↳ " if req != "" else "") + tr(md["name"])
+	nm.add_theme_font_override("font", GameData.font_bold)
+	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(nm)
+	var lvl := Label.new()
+	lvl.theme_type_variation = "Muted"
+	lvl.text = (tr("ур. %d/%d") % [lv, mx]) if mx > 0 else (tr("ур. %d") % lv)
+	lvl.name = "Level"
+	top.add_child(lvl)
+	var ds := Label.new()
+	ds.text = tr(md["desc"])
+	ds.theme_type_variation = "Muted"
+	ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ev.add_child(ds)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	ev.add_child(row)
+	var vn := Label.new()
+	vn.text = tr(md["value"])
+	row.add_child(vn)
+	var vv := Label.new()
+	vv.theme_type_variation = "Muted"
+	vv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vv.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vv.name = "Value"
+	if locked:
+		vn.visible = false   # у закрытого — только подсказка, без названия значения
+		vv.text = tr("Откроется после «%s»") % tr(GameData.meta_def(req)["name"])
+	elif maxed:
+		vv.text = "%s (%s)" % [GameData.meta_value(id, lv), tr("макс.")]
+	else:
+		vv.text = "%s → %s" % [GameData.meta_value(id, lv), GameData.meta_value(id, lv + 1)]
+	row.add_child(vv)
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(120, 56)
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	b.name = "Buy"
+	if maxed:
+		b.text = tr("макс.")
+		b.disabled = true
+	else:
+		b.text = "★ %d" % GameData.meta_cost(id)
+		b.disabled = not GameData.meta_can_buy(id)
+		if not b.disabled:
+			b.theme_type_variation = "AccentButton"
+	b.pressed.connect(_buy_meta.bind(id))
+	row.add_child(b)
+	return wrap
 
 
 func _buy_meta(id: String) -> void:

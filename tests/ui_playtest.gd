@@ -314,7 +314,11 @@ func _run() -> void:
 	await _wait(0.3)
 	await _shot("legacy")
 	var ml = get_tree().current_scene
-	check(ml.legacy_root.visible and ml.legacy_box.get_child_count() == 4, "в «Наследии» 4 ветки")
+	var branch_cards := 0
+	for c in ml.legacy_box.get_children():
+		if c is PanelContainer:
+			branch_cards += 1
+	check(ml.legacy_root.visible and branch_cards == 4, "в «Наследии» 4 ветки (карточки; сверху — пояснение)")
 	ml._show_screen("main")
 	await _wait(0.2)
 	check(await _tap("Профиль 1"), "в меню есть кнопка профиля")

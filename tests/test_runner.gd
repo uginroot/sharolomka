@@ -484,12 +484,15 @@ func test_translations_complete() -> void:
 			keys[e["desc"]] = "game_data.gd (эволюции)"
 			for tr_ in e["tracks"]:
 				keys[tr_["name"]] = "game_data.gd (ветки эволюций)"
+	for br in GameData.META_BRANCH_DESC:
+		keys[GameData.META_BRANCH_DESC[br]] = "game_data.gd (ветки Наследия)"
 	for br in GameData.META_BRANCHES:
 		keys[br] = "game_data.gd (ветки)"
 	for m in GameData.META:
 		if m.has("name"):
 			keys[m["name"]] = "game_data.gd (Наследие)"
 			keys[m["desc"]] = "game_data.gd (Наследие)"
+			keys[m["value"]] = "game_data.gd (Наследие)"
 	check(I18n.LANGS.size() >= 16, "языков меньше 16")
 	for code in I18n.LANGS:
 		if code == "ru":
@@ -2282,3 +2285,40 @@ func test_ball_dps_on_chips() -> void:
 	check(g.chips["basic"].get_meta("dps").text == want, "на фишке: «%s», ждали «%s»" % [g.chips["basic"].get_meta("dps").text, want])
 	check(g.upg_tabs_btn["basic"]["dps"].text == want, "на вкладке: «%s»" % g.upg_tabs_btn["basic"]["dps"].text)
 	check(g.chips["splash"].get_meta("dps").text == "—", "у типа без шаров не прочерк: «%s»" % g.chips["splash"].get_meta("dps").text)
+
+
+
+## «Наследие»: у каждого улучшения подложка, уровень, значение «сейчас → после покупки», кнопка ★;
+## зависимое — «Откроется после …»; покупка меняет значения.
+func test_legacy_screen() -> void:
+	GameData.reset_all()
+	GameData.stars = 5
+	var menu = load("res://scenes/main_menu.tscn").instantiate()
+	add_child(menu)
+	await get_tree().process_frame
+	menu._show_screen("legacy")
+	await get_tree().process_frame
+	for md in GameData.META:
+		var pan: Node = menu.legacy_box.find_child("Meta_" + md["id"], true, false)
+		check(pan != null, "нет подложки улучшения %s" % md["id"])
+		if pan == null:
+			continue
+		var val: Label = pan.find_child("Value", true, false)
+		var lvl: Label = pan.find_child("Level", true, false)
+		if String(md["req"]) != "":
+			check("Откроется после" in val.text, "%s: нет подсказки о зависимости: %s" % [md["id"], val.text])
+		else:
+			check("→" in val.text, "%s: нет «сейчас → после»: %s" % [md["id"], val.text])
+		check(lvl.text.begins_with("ур. 0"), "%s: уровень: %s" % [md["id"], lvl.text])
+	var v0: Label = menu.legacy_box.find_child("Meta_coin_bonus", true, false).find_child("Value", true, false)
+	check(v0.text == "+0% → +10%", "бонус монет: %s" % v0.text)
+	menu._buy_meta("coin_bonus")
+	await get_tree().process_frame
+	var v1: Label = menu.legacy_box.find_child("Meta_coin_bonus", true, false).find_child("Value", true, false)
+	check(v1.text == "+10% → +20%", "после покупки бонус монет: %s" % v1.text)
+	var sv: Label = menu.legacy_box.find_child("Meta_start_coins", true, false).find_child("Value", true, false)
+	check(sv.text == "0 → 90", "стартовые монеты после открытия ветки: %s" % sv.text)
+	check(GameData.meta_value("frenzy", 2) == "21 с" and GameData.meta_value("gold", 1) == "0.36%" and GameData.meta_value("start_balls", 0) == "1",
+		"значения: %s %s %s" % [GameData.meta_value("frenzy", 2), GameData.meta_value("gold", 1), GameData.meta_value("start_balls", 0)])
+	menu.queue_free()
+	GameData.reset_all()
