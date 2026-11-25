@@ -2258,3 +2258,27 @@ func test_upgrade_tabs() -> void:
 	check(ed != null and ed.text == tr(GameData.evo_def("basic", "scout")["desc"]), "у купленной эволюции нет описания")
 	var lr: Dictionary = g.evo_refs["basic"]["scout"]["ladders"]["scout_radius"]
 	check(lr["button"].icon == g.ic_gem and lr["button"].text == "1" and lr["label"].text == "2 → 3 кл", "строка ветки эволюции: «%s» [%s]" % [lr["label"].text, lr["button"].text])
+
+
+
+## Средний урон в секунду на один шар — на фишках главного экрана и на вкладках прокачки.
+func test_ball_dps_on_chips() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	g.balls.clear()
+	g.counts["basic"] = 4
+	g.extra["basic"] = 0
+	g.counts["splash"] = 0
+	g._spawn_ball("basic", 0.0, g.start_pos)
+	var id := -1
+	for y in g.H:
+		for x in g.W:
+			if id < 0 and g._kind_at(x, y) == 1 and g._hp_of(y * g.W + x) >= 60:
+				id = y * g.W + x
+	g.time_acc = 300.0
+	g._damage(id, 48, g.balls[0])
+	g._show_upgrades(true)   # вкладки прокачки обновляются, пока окно открыто
+	g._refresh_ui()
+	var want: String = g._rate_text(48.0 / 60.0 / 4.0)
+	check(g.chips["basic"].get_meta("dps").text == want, "на фишке: «%s», ждали «%s»" % [g.chips["basic"].get_meta("dps").text, want])
+	check(g.upg_tabs_btn["basic"]["dps"].text == want, "на вкладке: «%s»" % g.upg_tabs_btn["basic"]["dps"].text)
+	check(g.chips["splash"].get_meta("dps").text == "—", "у типа без шаров не прочерк: «%s»" % g.chips["splash"].get_meta("dps").text)

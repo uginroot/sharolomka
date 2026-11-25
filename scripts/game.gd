@@ -3499,7 +3499,7 @@ func _rebuild_rows() -> void:
 
 		# --- фишка выбора шара: значок и число шаров сверху, цена снизу (влезают все 5 типов)
 		if unlocked:
-			var chip := _button("", "ChipButton", 72)
+			var chip := _button("", "ChipButton", 86)
 			chip.toggle_mode = true
 			chip.button_group = chip_group
 			chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -3532,12 +3532,20 @@ func _rebuild_rows() -> void:
 			price.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			price.text_direction = Control.TEXT_DIRECTION_LTR
 			cv.add_child(price)
+			# средний урон в секунду на один шар этого типа (за 60 с) — какой тип выгоднее докупать
+			var cdps := Label.new()
+			cdps.add_theme_font_size_override("font_size", 15)
+			cdps.add_theme_color_override("font_color", C_DPS)
+			cdps.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cdps.text_direction = Control.TEXT_DIRECTION_LTR
+			cv.add_child(cdps)
 			chips[t] = chip
 			chip.set_meta("cnt", cnt)
 			chip.set_meta("price", price)
+			chip.set_meta("dps", cdps)
 
 		# --- вкладка шара в прокачке
-		var tb := _button("", "ChipButton", 66)
+		var tb := _button("", "ChipButton", 78)
 		tb.toggle_mode = true
 		tb.button_group = upg_tab_group
 		tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -3560,6 +3568,13 @@ func _rebuild_rows() -> void:
 		tcnt.text_direction = Control.TEXT_DIRECTION_LTR
 		tcnt.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		tv.add_child(tcnt)
+		var tdps := Label.new()
+		tdps.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tdps.add_theme_font_size_override("font_size", 14)
+		tdps.add_theme_color_override("font_color", C_DPS)
+		tdps.text_direction = Control.TEXT_DIRECTION_LTR
+		tdps.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tv.add_child(tdps)
 		var badge := PanelContainer.new()
 		var bsb := StyleBoxFlat.new()
 		bsb.bg_color = Color(0.36, 0.84, 0.54)
@@ -3579,7 +3594,7 @@ func _rebuild_rows() -> void:
 		bl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		badge.add_child(bl)
 		tb.add_child(badge)
-		upg_tabs_btn[t] = {"button": tb, "count": tcnt, "badge": badge, "badge_label": bl}
+		upg_tabs_btn[t] = {"button": tb, "count": tcnt, "dps": tdps, "badge": badge, "badge_label": bl}
 
 		# --- карточка шара (видна только у открытой вкладки)
 		var card := PanelContainer.new()
@@ -3677,6 +3692,19 @@ func _stats_panel(cv: VBoxContainer) -> Dictionary:
 		row.add_child(vl)
 		out[k[0]] = vl
 	return out
+
+
+const C_DPS := Color(0.62, 0.75, 1.0)   # цвет строки урона на фишках и вкладках
+
+
+## Средний урон в секунду на один шар типа (за 60 с) — для фишек и вкладок; у закрытого — пусто, без шаров — «—».
+func _ball_dps_text(t: String) -> String:
+	if not unl[t]:
+		return ""
+	var nb := int(counts[t]) + int(extra[t])
+	if nb <= 0:
+		return "—"
+	return _rate_text(_dps(t) / nb)
 
 
 ## Число в секунду для статистики: до 100 — с одним знаком, дальше — коротко (12.3K).
@@ -3941,6 +3969,7 @@ func _refresh_ui() -> void:
 		var price := _ball_cost(t)
 		chips[t].get_meta("cnt").text = "×%d" % counts[t]
 		chips[t].get_meta("price").text = GameData.fmt(price)
+		chips[t].get_meta("dps").text = _ball_dps_text(t)
 		chips[t].modulate = Color(1, 1, 1, 1.0 if coins >= price else 0.6)
 	var cd: float = reset_cd[selected]
 	# надпись не меняется — состояние показывает оформление: включено — акцентная заливка,
@@ -3959,6 +3988,7 @@ func _refresh_ui() -> void:
 		if upg_tabs_btn.has(t):
 			var tbr: Dictionary = upg_tabs_btn[t]
 			tbr["count"].text = ("×%d" % (int(counts[t]) + int(extra[t]))) if unl[t] else "1 U"
+			tbr["dps"].text = _ball_dps_text(t)
 			var af := _affordable(t)
 			tbr["badge"].visible = af > 0
 			tbr["badge_label"].text = str(af)
