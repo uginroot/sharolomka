@@ -554,8 +554,8 @@ func test_bottom_bar_fits() -> void:
 	check(g.top_bar.size.x <= vw + 0.5, "верхняя панель %.0f px шире экрана" % g.top_bar.size.x)
 	# нижний ряд: прокачка, угол, сброс — в этом порядке; меню справа вверху; надписи не вылезают на всех языках
 	var row: HBoxContainer = g.btn_snap.get_parent()
-	check(row.get_child(0) == g.btn_shake and row.get_child(1).text == tr("Прокачка") and row.get_child(2) == g.btn_snap and row.get_child(3) == g.btn_reset,
-		"порядок нижних кнопок не «встряска, прокачка, угол, вернуть шар»")
+	check(row.get_child(0).text == tr("Прокачка") and row.get_child(1) == g.btn_snap and row.get_child(2) == g.btn_shake and row.get_child(3) == g.btn_reset,
+		"порядок нижних кнопок не «прокачка, угол, встряска, вернуть шар»")
 	check(g.btn_snap.get_parent().get_parent().get_parent().get_parent() == g.bottom_bar, "выбор угла не внизу")
 	var top_row: HBoxContainer = g.lbl_rub.get_parent().get_parent().get_parent()
 	check(top_row.get_child(top_row.get_child_count() - 1) is Button, "кнопка меню не справа вверху")
@@ -570,7 +570,7 @@ func test_bottom_bar_fits() -> void:
 				g.reset_cd["basic"] = 0.0 if armed else 28.0
 				g._refresh_ui()
 				await get_tree().process_frame
-				for bb in [g.btn_shake, row.get_child(1), g.btn_snap, g.btn_reset]:
+				for bb in [row.get_child(0), g.btn_snap, g.btn_shake, g.btn_reset]:
 					check(bb.get_global_rect().end.x <= vw + 0.5, "%s: кнопка «%s» за краем экрана" % [code, bb.text])
 					var fsz: int = bb.get_theme_font_size("font_size")
 					var w1: float = GameData.font.get_string_size(bb.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x

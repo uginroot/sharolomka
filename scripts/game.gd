@@ -3285,7 +3285,7 @@ func _build_ui() -> void:
 	reset_fill_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	reset_fill.add_child(reset_fill_panel)
 	btn_reset.resized.connect(_layout_reset_fill)
-	for bb in [btn_shake, bup, btn_snap, btn_reset]:
+	for bb in [bup, btn_snap, btn_shake, btn_reset]:   # «Встряска» — рядом с «Вернуть шар»
 		bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		bb.custom_minimum_size.x = 0
 		bb.autowrap_mode = TextServer.AUTOWRAP_OFF
