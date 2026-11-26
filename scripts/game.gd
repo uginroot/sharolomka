@@ -82,12 +82,13 @@ var finale_ids := PackedInt32Array()
 var finale_dist := PackedInt32Array()
 var finale_t := 0.0
 var full_tracked := false        # знаем число всех квадратов (маленькие карты и карты-картины) — есть полная расчистка
-var finale_pass := PackedByteArray()   # финал: 1 — свободная клетка (по ней идёт поле расстояний)
+var finale_pass := PackedByteArray()   # финал: тип клеток всей карты (0 — свободно, по ним идёт поле расстояний)
+var field_alive := -1                  # сколько квадратов оставалось при последнем пересчёте поля
 var bfs_q := PackedInt32Array()        # поле расстояний считается порциями (на больших картах — полмиллиона клеток)
 var bfs_head := 0
 var bfs_dist := PackedInt32Array()
 var bfs_busy := false
-const BFS_BUDGET := 40000              # клеток поля за кадр
+const BFS_BUDGET := 6000              # клеток поля за кадр на большой карте (маленькая — целиком сразу)
 const FINALE_BIG_SHARE := 0.01         # финал большой карты — последний 1% квадратов, но не больше FINALE_BIG_MAX
 const FINALE_BIG_MAX := 2000
 var ex0 := 0
@@ -1427,8 +1428,9 @@ func _sim(dt: float) -> void:
 		if bfs_busy:
 			_finale_field_step()
 		finale_t -= dt
-		if finale_t <= 0.0:
-			finale_t = 1.0
+		if finale_t <= 0.0 and not bfs_busy and alive != field_alive:
+			# пересчёт поля — только если что-то разбили; на большой карте — не чаще раза в 2 с
+			finale_t = 2.0 if W * H > PREGEN_LIMIT else 1.0
 			_finale_field()
 		for b in balls:
 			if time_acc - b.seek_t > 0.25:
@@ -2156,7 +2158,7 @@ func _damage(id: int, amount: int, b) -> void:
 		destroyed += 1
 		alive -= 1
 		if finale and finale_pass.size() == W * H:
-			finale_pass[id] = 1   # разбитая клетка стала проходом для поля расстояний
+			finale_pass[id] = 0   # разбитая клетка стала проходом для поля расстояний
 		_on_destroyed(x, y, id)
 
 
@@ -2220,21 +2222,12 @@ func _tick_poison(dt: float) -> void:
 func _start_finale() -> void:
 	finale = true
 	finale_ids = PackedInt32Array()
-	finale_pass.resize(W * H)
-	finale_pass.fill(0)
+	for ck in chunks.size():
+		if chunks[ck] == null:
+			_get_chunk(ck)   # большая карта: досоздаём ещё не открытые куски — там тоже остались квадраты
+	_build_finale_pass()
 	for ck in chunks.size():
 		var c = chunks[ck]
-		if c == null:
-			c = _get_chunk(ck)   # большая карта: досоздаём ещё не открытые куски — там тоже остались квадраты
-		var ox: int = (ck % cw) * CS
-		@warning_ignore("integer_division")
-		var oy: int = (ck / cw) * CS
-		for li in CS * CS:
-			if c.kind[li] == 0:
-				var px := ox + (li & 31)
-				var py := oy + (li >> 5)
-				if px < W and py < H:
-					finale_pass[py * W + px] = 1
 		if c.solid == 0:
 			continue
 		for li in CS * CS:
@@ -2261,38 +2254,85 @@ func _start_finale() -> void:
 func _finale_field() -> void:
 	if bfs_busy:
 		return
-	bfs_dist.resize(W * H)
-	bfs_dist.fill(1 << 30)
-	bfs_q = PackedInt32Array()
+	var dist := PackedInt32Array()   # новый массив: готовое поле (finale_dist) остаётся нетронутым, без копий
+	dist.resize(W * H)
+	dist.fill(1 << 30)
+	var q := PackedInt32Array()
 	var live := PackedInt32Array()
 	for id in finale_ids:
 		if _hp_of(id) > 0:
 			live.append(id)
-			bfs_dist[id] = 0
-			bfs_q.append(id)
+			dist[id] = 0
+			q.append(id)
 	finale_ids = live
+	bfs_dist = dist
+	bfs_q = q
 	bfs_head = 0
 	bfs_busy = true
+	field_alive = alive
 	_finale_field_step()
 
 
+## Порция обхода: развёрнутые соседи, массивы правятся на месте (поле объекта на время работы обнулено —
+## иначе упакованный массив копировался бы при первой записи), без временных массивов на каждую клетку.
 func _finale_field_step() -> void:
-	var budget := BFS_BUDGET
+	var q := bfs_q
+	var dist := bfs_dist
+	var pas := finale_pass
+	bfs_q = PackedInt32Array()
+	bfs_dist = PackedInt32Array()
+	var head := bfs_head
+	var w := W
 	var n := W * H
-	while bfs_head < bfs_q.size() and budget > 0:
+	var budget := BFS_BUDGET if n > PREGEN_LIMIT else 1 << 30
+	while head < q.size() and budget > 0:
 		budget -= 1
-		var id := bfs_q[bfs_head]
-		bfs_head += 1
-		var x := id % W
-		var nd := bfs_dist[id] + 1
-		for j in [id - 1 if x > 0 else -1, id + 1 if x < W - 1 else -1, id - W, id + W]:
-			if j < 0 or j >= n or bfs_dist[j] <= nd or finale_pass[j] == 0:
-				continue
-			bfs_dist[j] = nd
-			bfs_q.append(j)
-	if bfs_head >= bfs_q.size():
-		finale_dist = bfs_dist.duplicate()
+		var id: int = q[head]
+		head += 1
+		var nd: int = dist[id] + 1
+		var x: int = id % w
+		var j: int
+		if x > 0:
+			j = id - 1
+			if pas[j] == 0 and dist[j] > nd:
+				dist[j] = nd
+				q.append(j)
+		if x < w - 1:
+			j = id + 1
+			if pas[j] == 0 and dist[j] > nd:
+				dist[j] = nd
+				q.append(j)
+		if id >= w:
+			j = id - w
+			if pas[j] == 0 and dist[j] > nd:
+				dist[j] = nd
+				q.append(j)
+		j = id + w
+		if j < n and pas[j] == 0 and dist[j] > nd:
+			dist[j] = nd
+			q.append(j)
+	bfs_head = head
+	if head >= q.size():
+		finale_dist = dist   # готово — подменяем поле (ссылкой, без копии)
 		bfs_busy = false
+		bfs_q = PackedInt32Array()
+		bfs_dist = PackedInt32Array()
+	else:
+		bfs_q = q
+		bfs_dist = dist
+
+
+## Карта проходимости для поля: тип клеток всей карты (0 — свободно), собранная строками кусков.
+func _build_finale_pass() -> void:
+	var out := PackedByteArray()
+	for y in H:
+		var cy := y >> 5
+		var ly := (y & 31) << 5
+		for cx in cw:
+			var c = chunks[cx + cy * cw]
+			var wn := mini(CS, W - cx * CS)
+			out.append_array(c.kind.slice(ly, ly + wn))
+	finale_pass = out
 
 
 func _finale_steer(b) -> void:
