@@ -1417,6 +1417,7 @@ func _spawn_ball(t: String, ang: float, at = null) -> void:
 	b.radius = float(GameData.TYPES[t]["radius"])
 	b.pos = start_pos if at == null else at
 	b.vel = Vector2.from_angle(deg_to_rad(ang)) * _speed(t)
+	b.pos = _depenetrate(b, b.pos, false)   # пущен у самого угла стены — сразу наружу, иначе мог застрять
 	balls.append(b)
 
 
@@ -1476,6 +1477,62 @@ func _sim(dt: float) -> void:
 			reset_cd[t] = maxf(0.0, reset_cd[t] - dt)
 	if shake_cd > 0.0:
 		shake_cd = maxf(0.0, shake_cd - dt)
+
+
+## Выталкивание: если шар перекрывает стену или квадрат (пущен у самого угла, сдвинут «Встряской» и т. п.),
+## сдвигаем центр наружу от ближайшей точки клетки. Клетки, сквозь которые Отбойник проходит намеренно, не трогаем.
+func _depenetrate(b, p: Vector2, pierce: bool) -> Vector2:
+	var r: float = b.radius
+	# быстрый выход: шар в пустом куске и не задевает его границу — перекрывать нечего (так почти всегда)
+	var gx := int(p.x * INV)
+	var gy := int(p.y * INV)
+	if gx < 0 or gy < 0 or gx >= W or gy >= H:
+		return p
+	var c0 = chunks[(gx >> 5) + (gy >> 5) * cw]
+	if c0 != null and c0.solid == 0:
+		var bx0 := float((gx >> 5) << 5) * CELL
+		var by0 := float((gy >> 5) << 5) * CELL
+		if p.x - r > bx0 and p.x + r < bx0 + CPX and p.y - r > by0 and p.y + r < by0 + CPX:
+			return p
+	# быстрый выход: шар целиком внутри своей свободной клетки
+	var fx := p.x - gx * CELL
+	var fy := p.y - gy * CELL
+	if fx >= r and fx <= CELL - r and fy >= r and fy <= CELL - r and c0 != null \
+			and c0.kind[((gy & 31) << 5) | (gx & 31)] == 0:
+		return p
+	for pass_i in 2:
+		var moved := false
+		var x0 := maxi(0, int((p.x - r) * INV))
+		var x1 := mini(W - 1, int((p.x + r) * INV))
+		var y0 := maxi(0, int((p.y - r) * INV))
+		var y1 := mini(H - 1, int((p.y + r) * INV))
+		for cy in range(y0, y1 + 1):
+			for cx in range(x0, x1 + 1):
+				var k := _kind_at(cx, cy)
+				if k != 1 and k != 2:
+					continue
+				var id := cy * W + cx
+				if pierce and b.recent.has(id) and time_acc - float(b.recent[id]) < 0.3:
+					continue
+				var q := Vector2(clampf(p.x, cx * CELL, cx * CELL + CELL), clampf(p.y, cy * CELL, cy * CELL + CELL))
+				var v := p - q
+				var dl := v.length()
+				if dl >= r:
+					continue
+				if dl > 1e-4:
+					p += v / dl * (r - dl + 0.05)
+				else:
+					# центр внутри клетки — к ближайшей грани
+					var c := (Vector2(cx, cy) + Vector2(0.5, 0.5)) * CELL
+					var o := p - c
+					if absf(o.x) >= absf(o.y):
+						p.x = c.x + signf(o.x if o.x != 0.0 else 1.0) * (CELL * 0.5 + r + 0.05)
+					else:
+						p.y = c.y + signf(o.y if o.y != 0.0 else 1.0) * (CELL * 0.5 + r + 0.05)
+				moved = true
+		if not moved:
+			break
+	return p
 
 
 ## Клещ: бурит клетку со скоростью «Хватки» (ударов в секунду). Пробил — «Глубже» ведёт дальше по линии,
@@ -1726,9 +1783,20 @@ func _move_ball(b, delta: float) -> void:
 						nx = -signf(d.x)
 						ny = -signf(d.y)
 					if tn < 0.0:
-						# уже внутри — сталкиваемся, только если движемся внутрь
-						if d.x * nx + d.y * ny >= 0.0:
+						# уже внутри — нормаль по геометрии (от ближайшей точки клетки к центру шара), а не по
+						# направлению движения: иначе «движемся внутрь» выходило всегда, и шар у угла застревал
+						var q := Vector2(clampf(p.x, lx + r, hx - r), clampf(p.y, ly + r, hy - r))
+						var gn := p - q
+						if gn.length_squared() < 1e-8:
 							continue
+						if d.dot(gn) >= 0.0:
+							continue   # выходим из клетки — не мешаем
+						if absf(gn.x) >= absf(gn.y):
+							nx = signf(gn.x)
+							ny = 0.0
+						else:
+							nx = 0.0
+							ny = signf(gn.y)
 						tn = 0.0
 					best = tn
 					bnx = nx
@@ -1763,6 +1831,7 @@ func _move_ball(b, delta: float) -> void:
 		if best < 0.001:
 			stalls += 1
 			if stalls > 3:
+				p = _depenetrate(b, p, pierce)   # топчется на месте — значит, перекрыл клетку: выталкиваем
 				break
 		else:
 			stalls = 0

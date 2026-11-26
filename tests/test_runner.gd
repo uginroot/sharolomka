@@ -2384,3 +2384,33 @@ func test_lightning_bolts() -> void:
 	for k in 30:
 		g._sim(0.016)
 	check(g.zaps.is_empty(), "анимация молнии не погасла")
+
+
+## Шар, который оказался перекрывающим угол стены (например, пущен у самого угла), не застревает:
+## раньше нормаль «изнутри» бралась из направления движения — шар отражался на месте каждый кадр.
+func test_ball_unstuck_at_corner() -> void:
+	var g = await new_game(2)
+	# одна стеновая клетка у старта (там всё расчищено) — выпуклый угол со свободными соседями
+	var wc: Vector2i = g.start_cell - Vector2i(1, 1)
+	var ck: int = (wc.x >> 5) + (wc.y >> 5) * g.cw
+	var c = g._get_chunk(ck)
+	var li: int = ((wc.y & 31) << 5) | (wc.x & 31)
+	if c.kind[li] != 2:
+		c.kind[li] = 2
+		c.solid += 1
+	var corner := Vector2(wc.x + 1, wc.y + 1) * 40.0
+	for ang in [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0, 10.0, 80.0]:
+		g.balls.clear()
+		g._spawn_ball("sniper", ang, corner + Vector2(1.3, 5.3))   # центр перекрывает угол, как на снимке
+		var b = g.balls[0]
+		# застрявший шар стоит на месте; живой — пролетает путь (может и вернуться, отскочив от квадратов рядом)
+		var path := 0.0
+		var still := 0
+		for k in 60:
+			var before: Vector2 = b.pos
+			g._move_ball(b, 1.0 / 60.0)
+			var stp: float = before.distance_to(b.pos)
+			path += stp
+			if stp < 0.5:
+				still += 1
+		check(path > 300.0 and still <= 2, "шар застрял у угла (пуск под %d°): путь %.0f, кадров на месте %d" % [ang, path, still])
