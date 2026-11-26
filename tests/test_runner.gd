@@ -2358,3 +2358,29 @@ func test_shake() -> void:
 	game = GAME.instantiate()
 	add_child(game)
 	check(absf(game.shake_cd - 150.0) < 0.5, "перезарядка не сохранилась: %.1f" % game.shake_cd)
+
+
+
+## Молния рисуется ломаными разрядами к поражённым клеткам (не кругом): у каждого разряда — точки излома и цель.
+func test_lightning_bolts() -> void:
+	var g = await new_game(2, func(): unlock_all())
+	g.run_u = 100
+	g._buy_evo("splash", "lightning")
+	for k in 6:
+		g._buy_ladder("splash", "lightning_range")
+	g.balls.clear()
+	g._spawn_ball("splash", 0.0, g.start_pos)
+	var rb = g.balls[0]
+	var id: int = _brick_near(g, g.start_cell, 3)
+	rb.pos = (Vector2(id % g.W, id / g.W) + Vector2(0.5, 0.5)) * 40.0 + Vector2(0, 40)
+	g.zaps.clear()
+	g._lightning(rb)
+	check(g.zaps.size() == 1, "разряд не попал в анимацию")
+	if g.zaps.size() == 1:
+		var z: Dictionary = g.zaps[0]
+		check(z["bolts"].size() >= 1 and z["bolts"].size() <= g.ZAP_BOLTS, "молний: %d" % z["bolts"].size())
+		var pts: PackedVector2Array = z["bolts"][0]
+		check(pts.size() >= 4 and pts[0] == rb.pos and z["sparks"].has(pts[pts.size() - 1]), "молния не от шара к клетке")
+	for k in 30:
+		g._sim(0.016)
+	check(g.zaps.is_empty(), "анимация молнии не погасла")

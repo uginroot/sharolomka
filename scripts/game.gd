@@ -1907,22 +1907,50 @@ func _lightning(b) -> void:
 	var amount := 0.25 * base
 	var cx := int(b.pos.x * INV)
 	var cy := int(b.pos.y * INV)
-	var hit := false
+	var targets := PackedVector2Array()
 	for yy in range(maxi(0, cy - r), mini(H - 1, cy + r) + 1):
 		for xx in range(maxi(0, cx - r), mini(W - 1, cx + r) + 1):
 			if (xx - cx) * (xx - cx) + (yy - cy) * (yy - cy) > r * r:
 				continue
 			if _kind_at(xx, yy) != 1 or not _vis_at(xx, yy):
 				continue
-			if not _clear_line(b.pos, (Vector2(xx, yy) + Vector2(0.5, 0.5)) * CELL):
+			var tc := (Vector2(xx, yy) + Vector2(0.5, 0.5)) * CELL
+			if not _clear_line(b.pos, tc):
 				continue
 			var a := _prob_round(amount)
 			if a > 0:
 				_damage(yy * W + xx, a, b)
-				hit = true
-	if hit and zaps.size() < 40:
-		zaps.append({"pos": b.pos, "r": (r + 0.5) * CELL, "t": 0.18})
+				targets.append(tc)
+	if not targets.is_empty() and zaps.size() < 24:
+		zaps.append(_make_zap(b.pos, targets))
 		overlay_dirty = true
+
+
+## Анимация разряда: ломаные молнии от шара к поражённым клеткам (до ZAP_BOLTS, остальным — искры).
+## Изломы считаются один раз — пока разряд гаснет, молния не «дрожит».
+const ZAP_TIME := 0.28
+const ZAP_BOLTS := 12
+
+
+func _make_zap(from: Vector2, targets: PackedVector2Array) -> Dictionary:
+	var order := range(targets.size())
+	order.shuffle()
+	var bolts := []
+	var sparks := PackedVector2Array()
+	for k in order.size():
+		var tgt: Vector2 = targets[order[k]]
+		if k < ZAP_BOLTS:
+			var pts := PackedVector2Array([from])
+			var d := tgt - from
+			var n := clampi(int(d.length() / (CELL * 0.8)), 3, 10)
+			var side := d.orthogonal().normalized()
+			for i in range(1, n):
+				var f := float(i) / n
+				pts.append(from + d * f + side * randf_range(-0.35, 0.35) * CELL)
+			pts.append(tgt)
+			bolts.append(pts)
+		sparks.append(tgt)
+	return {"bolts": bolts, "sparks": sparks, "t": ZAP_TIME}
 
 
 ## Нет ли стены между двумя точками (проверка по клеткам с шагом в полклетки).
@@ -2330,8 +2358,6 @@ func _draw_balls() -> void:
 	# на экране шарик не меньше 11 пикселей, иначе его не видно при отдалении
 	var min_d := 11.0 / zoom
 	var ar := aura_r_now if aura_r_now > 0.0 else _aura_radius()   # с боевым кличем круг шире
-	var acol: Color = colors["banner"]
-	acol.a = 0.35
 	var hl := highlight_t > 0.0
 	# «Вернуть шар» включён — пульсирует шар, который вернётся (бездельник выбранного типа)
 	var idle_b = _idler(selected) if reset_armed else null
@@ -2364,8 +2390,15 @@ func _draw_balls() -> void:
 			ball_layer.draw_arc(b.pos, dd * (0.9 + 0.35 * pulse), 0.0, TAU, 28, Color(0.45, 0.85, 1.0, 0.95 - 0.5 * pulse), maxf(2.0, 3.5 / zoom))
 		if hl and b.type == highlight_type:
 			ball_layer.draw_arc(b.pos, dd * 0.85, 0.0, TAU, 24, hcol, maxf(2.0, 3.0 / zoom))
-		if b.type == "banner" and lod == 0:
-			ball_layer.draw_arc(b.pos, ar, 0.0, TAU, 40, acol, 1.5 / zoom)
+		if b.type == "banner":
+			# круг ауры виден при любом масштабе: лёгкая заливка и чёткий контур; при боевом кличе — ярче
+			var cry: bool = ar > _aura_radius() * 1.5
+			var fill: Color = colors["banner"]
+			fill.a = 0.12 if cry else 0.07
+			var ring: Color = colors["banner"]
+			ring.a = 0.85 if cry else 0.55
+			ball_layer.draw_circle(b.pos, ar, fill)
+			ball_layer.draw_arc(b.pos, ar, 0.0, TAU, 48, ring, maxf(1.5, 2.5 / zoom))
 
 
 ## Поворот текстуры капли: её кончик (вверх, −Y) должен смотреть против полёта.
@@ -2669,7 +2702,14 @@ func _draw_border() -> void:
 func _draw_overlay() -> void:
 	# вспышки молний: тонкий круг радиуса разряда, быстро гаснет
 	for z in zaps:
-		overlay.draw_arc(z["pos"], z["r"], 0.0, TAU, 40, Color(0.7, 0.85, 1.0, 0.7 * z["t"] / 0.18), 2.0 / zoom)
+		var k: float = z["t"] / ZAP_TIME
+		var glow := Color(0.55, 0.75, 1.0, 0.35 * k)
+		var core := Color(0.92, 0.97, 1.0, 0.95 * k)
+		for pts in z["bolts"]:
+			overlay.draw_polyline(pts, glow, 6.0 / zoom)    # свечение
+			overlay.draw_polyline(pts, core, 2.0 / zoom)    # яркая сердцевина
+		for p in z["sparks"]:
+			overlay.draw_circle(p, (6.0 + 10.0 * (1.0 - k)) / zoom, Color(0.75, 0.88, 1.0, 0.55 * k))   # вспышка на клетке
 	var w := 3.0 / zoom
 	var dir := Vector2.from_angle(deg_to_rad(aim_angle))
 	var col: Color = colors[selected]
