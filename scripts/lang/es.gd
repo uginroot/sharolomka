@@ -199,4 +199,5 @@ const T := {
 	"ур. %d/%d": "nv. %d/%d",
 	"ур. %d": "nv. %d",
 	"Откроется после «%s»": "Se desbloquea tras «%s»",
+	"Встряска": "Sacudir",
 }

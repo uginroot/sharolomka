@@ -155,7 +155,7 @@ const T := {
 	"Пройдено за %s": "Geschafft in %s",
 	"лучшее %s": "Bestzeit %s",
 	"сейчас %s": "jetzt %s",
-	"Вернуть шар": "Ball zurückholen",
+	"Вернуть шар": "Zurückholen",
 	"Космодром": "Kosmodrom",
 	"Гавань": "Hafen",
 	"Обсерватория": "Sternwarte",
@@ -199,4 +199,5 @@ const T := {
 	"ур. %d/%d": "St. %d/%d",
 	"ур. %d": "St. %d",
 	"Откроется после «%s»": "Wird nach „%s“ freigeschaltet",
+	"Встряска": "Schütteln",
 }

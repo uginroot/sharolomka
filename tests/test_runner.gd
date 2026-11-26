@@ -554,8 +554,8 @@ func test_bottom_bar_fits() -> void:
 	check(g.top_bar.size.x <= vw + 0.5, "верхняя панель %.0f px шире экрана" % g.top_bar.size.x)
 	# нижний ряд: прокачка, угол, сброс — в этом порядке; меню справа вверху; надписи не вылезают на всех языках
 	var row: HBoxContainer = g.btn_snap.get_parent()
-	check(row.get_child(0).text == tr("Прокачка") and row.get_child(1) == g.btn_snap and row.get_child(2) == g.btn_reset,
-		"порядок нижних кнопок не «прокачка, угол, сброс»")
+	check(row.get_child(0) == g.btn_shake and row.get_child(1).text == tr("Прокачка") and row.get_child(2) == g.btn_snap and row.get_child(3) == g.btn_reset,
+		"порядок нижних кнопок не «встряска, прокачка, угол, вернуть шар»")
 	check(g.btn_snap.get_parent().get_parent().get_parent().get_parent() == g.bottom_bar, "выбор угла не внизу")
 	var top_row: HBoxContainer = g.lbl_rub.get_parent().get_parent().get_parent()
 	check(top_row.get_child(top_row.get_child_count() - 1) is Button, "кнопка меню не справа вверху")
@@ -570,15 +570,16 @@ func test_bottom_bar_fits() -> void:
 				g.reset_cd["basic"] = 0.0 if armed else 28.0
 				g._refresh_ui()
 				await get_tree().process_frame
-				for bb in [row.get_child(0), g.btn_snap, g.btn_reset]:
+				for bb in [g.btn_shake, row.get_child(1), g.btn_snap, g.btn_reset]:
 					check(bb.get_global_rect().end.x <= vw + 0.5, "%s: кнопка «%s» за краем экрана" % [code, bb.text])
 					var fsz: int = bb.get_theme_font_size("font_size")
 					var w1: float = GameData.font.get_string_size(bb.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
 					# с переносом строки текст может занимать 2 строки — ширина самого длинного слова должна влезать
 					# мерить ширину имеет смысл, только если встроенный шрифт содержит все символы: иначе в окружении
 					# без системных шрифтов (CI) меряются запасные глифы, а на телефоне шрифт письменности есть
+					var shown_txt: String = bb.atr(bb.text)   # показанный текст (кнопки переводятся движком)
 					var covered := true
-					for ch in bb.text:
+					for ch in shown_txt:
 						if not GameData.font.has_char(ch.unicode_at(0)):
 							covered = false
 					if not covered:
@@ -588,8 +589,8 @@ func test_bottom_bar_fits() -> void:
 					var room: float = bb.size.x - sb.get_content_margin(SIDE_LEFT) - sb.get_content_margin(SIDE_RIGHT)
 					if bb.icon != null:
 						room -= float(bb.get_theme_constant("icon_max_width")) + float(bb.get_theme_constant("h_separation"))
-					var need: float = GameData.font.get_string_size(bb.text, HORIZONTAL_ALIGNMENT_LEFT, -1, bb.get_theme_font_size("font_size")).x
-					check(need <= room + 0.5, "%s: надпись не помещается в одну строку: «%s» (%.0f > %.0f)" % [code, bb.text, need, room])
+					var need: float = GameData.font.get_string_size(shown_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, bb.get_theme_font_size("font_size")).x
+					check(need <= room + 0.5, "%s: надпись не помещается в одну строку: «%s» (%.0f > %.0f)" % [code, shown_txt, need, room])
 				# высота нижней панели одна и та же во всех состояниях и на всех языках
 				if bar_h < 0.0:
 					bar_h = g.bottom_bar.size.y
@@ -2322,3 +2323,38 @@ func test_legacy_screen() -> void:
 		"значения: %s %s %s" % [GameData.meta_value("frenzy", 2), GameData.meta_value("gold", 1), GameData.meta_value("start_balls", 0)])
 	menu.queue_free()
 	GameData.reset_all()
+
+
+
+## «Встряска»: каждый шар поворачивается на 10–20°, скорость та же; раз в 5 минут; перезарядка сохраняется с уровнем.
+func test_shake() -> void:
+	var g = await new_game(2)
+	g.coins = 100000
+	for k in 8:
+		g._fire(g.start_pos)
+		g.aim_angle += 37
+	var before := []
+	for b in g.balls:
+		before.append(b.vel)
+	g._refresh_ui()
+	check(not g.btn_shake.disabled, "кнопка встряски неактивна в начале")
+	g._shake()
+	for i in g.balls.size():
+		var a: float = rad_to_deg(absf(before[i].angle_to(g.balls[i].vel)))
+		check(a >= 9.99 and a <= 20.01, "шар %d повернулся на %.1f°" % [i, a])
+		check(is_equal_approx(before[i].length(), g.balls[i].vel.length()), "у шара изменилась скорость")
+	check(is_equal_approx(g.shake_cd, g.SHAKE_CD) and g.btn_shake.disabled, "перезарядка не началась")
+	var v1: Vector2 = g.balls[0].vel
+	g._shake()
+	check(g.balls[0].vel == v1, "встряска сработала во время перезарядки")
+	g.shake_cd = g.SHAKE_CD * 0.5
+	g._refresh_ui()
+	await get_tree().process_frame
+	check(g.shake_fill.visible and absf(g.shake_fill.size.x - g.btn_shake.size.x * 0.5) < 1.0, "заливка перезарядки встряски")
+	g._save_state()
+	game.queue_free()
+	game = null
+	await get_tree().process_frame
+	game = GAME.instantiate()
+	add_child(game)
+	check(absf(game.shake_cd - 150.0) < 0.5, "перезарядка не сохранилась: %.1f" % game.shake_cd)

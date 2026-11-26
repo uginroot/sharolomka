@@ -14,6 +14,9 @@ const CS := 32                   # клеток в куске по сторон�
 const CPX := 1280.0              # CS * CELL
 const START_CLEAR := 2.3         # радиус пустой площадки у старта, клеток
 const RESET_CD := 30.0
+const SHAKE_CD := 300.0          # «Встряска»: раз в 5 минут
+const SHAKE_MIN := 10.0          # поворот направления каждого шара, градусов (случайно, в случайную сторону)
+const SHAKE_MAX := 20.0
 const MAX_OFFLINE := 86400.0     # перематываем не больше суток
 const WARP_BUDGET_US := 9000     # сколько микросекунд за кадр можно тратить на перемотку
 const PREGEN_LIMIT := 60000      # карты меньше этого генерируем целиком (можно пройти на 100%)
@@ -117,6 +120,10 @@ var aura_r_now := 0.0            # текущий радиус ауры (с бо
 var fleet := {}                  # бонусы стаи: вид → число ступеней
 var aura_t := 0.0
 var reset_cd := {}
+var shake_cd := 0.0              # перезарядка «Встряски», с (сохраняется с уровнем)
+var btn_shake: Button
+var shake_fill: Control
+var shake_fill_panel: Panel
 var reset_armed := false        # «Сброс» включён: следующий выстрел перезапускает бездельника
 
 # ---- время
@@ -1132,6 +1139,7 @@ func _load_state() -> float:
 		counts["basic"] = 1
 	run_u = int(s.get("u", 0))
 	play_time = maxf(0.0, float(s.get("time", 0.0)))
+	shake_cd = clampf(float(s.get("shake_cd", 0.0)), 0.0, SHAKE_CD)
 	var dt_saved: Dictionary = s.get("dmg_total", {})
 	for t in GameData.TYPE_ORDER:
 		dmg_total[t] = maxi(0, int(dt_saved.get(t, 0)))
@@ -1178,7 +1186,7 @@ func _save_state() -> void:
 	var s := {
 		"ver": 8, "w": W, "coins": coins, "destroyed": destroyed, "goal_done": goal_done,
 		"counts": counts.duplicate(), "tracks": tlvl.duplicate(true), "unl": unl.duplicate(),
-		"evo": evo.duplicate(true), "elvl": elvl.duplicate(true), "extra": extra.duplicate(), "time": play_time,
+		"evo": evo.duplicate(true), "elvl": elvl.duplicate(true), "extra": extra.duplicate(), "time": play_time, "shake_cd": shake_cd,
 		"dmg_total": dmg_total.duplicate(),
 		"saved_at": Time.get_unix_time_from_system(), "chunks": out,
 		"balls": balls.map(func(b): return [b.type, b.pos.x, b.pos.y, b.vel.x, b.vel.y]),
@@ -1199,6 +1207,11 @@ func _save_state() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and btn_reset != null:
+		for bb in btn_reset.get_parent().get_children():
+			if bb is Button:
+				_fit_button_text.call_deferred(bb)   # язык сменился — подогнать надписи нижнего ряда заново
+		return
 	match what:
 		NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_WM_CLOSE_REQUEST, NOTIFICATION_APPLICATION_FOCUS_OUT:
 			_save_state()
@@ -1461,6 +1474,8 @@ func _sim(dt: float) -> void:
 	for t in reset_cd:
 		if reset_cd[t] > 0.0:
 			reset_cd[t] = maxf(0.0, reset_cd[t] - dt)
+	if shake_cd > 0.0:
+		shake_cd = maxf(0.0, shake_cd - dt)
 
 
 ## Клещ: бурит клетку со скоростью «Хватки» (ударов в секунду). Пробил — «Глубже» ведёт дальше по линии,
@@ -3246,6 +3261,11 @@ func _build_ui() -> void:
 	bv.add_child(br)
 	# нижний ряд: прокачка, угол, «Вернуть шар». Надписи всегда в одну строку (шрифт ужимается под ширину),
 	# высота ряда постоянна — интерфейс не прыгает при смене состояний
+	btn_shake = _button(tr("Встряска"), "ChipButton", 64, Icons.shake(40))
+	btn_shake.pressed.connect(_shake)
+	var sf := _make_cd_fill(btn_shake)
+	shake_fill = sf[0]
+	shake_fill_panel = sf[1]
 	var bup := _button(tr("Прокачка"), "AccentButton", 64, Icons.arrow_up(40))
 	bup.pressed.connect(_show_upgrades.bind(true))
 	btn_snap = _button("", "", 64, Icons.angle(40))
@@ -3265,11 +3285,12 @@ func _build_ui() -> void:
 	reset_fill_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	reset_fill.add_child(reset_fill_panel)
 	btn_reset.resized.connect(_layout_reset_fill)
-	for bb in [bup, btn_snap, btn_reset]:
+	for bb in [btn_shake, bup, btn_snap, btn_reset]:
 		bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		bb.custom_minimum_size.x = 0
 		bb.autowrap_mode = TextServer.AUTOWRAP_OFF
 		bb.clip_text = true
+		bb.set_meta("icon0", bb.icon)
 		br.add_child(bb)
 		bb.resized.connect(_fit_button_text.bind(bb))
 	bottom_bar.resized.connect(_on_bars_resized)
@@ -3915,14 +3936,64 @@ func _fit_button_text(bb: Button) -> void:
 		return
 	var font: Font = bb.get_theme_font("font")
 	var sb: StyleBox = bb.get_theme_stylebox("normal")
-	var room := bb.size.x - sb.get_content_margin(SIDE_LEFT) - sb.get_content_margin(SIDE_RIGHT)
-	if bb.icon != null:
-		room -= float(bb.get_theme_constant("icon_max_width")) + float(bb.get_theme_constant("h_separation"))
+	var icon0: Texture2D = bb.get_meta("icon0", bb.icon)
+	var base_room := bb.size.x - sb.get_content_margin(SIDE_LEFT) - sb.get_content_margin(SIDE_RIGHT)
+	var with_icon := base_room - (float(bb.get_theme_constant("icon_max_width")) + float(bb.get_theme_constant("h_separation")) if icon0 != null else 0.0)
 	var fs := ROW_FONT
-	while fs > 15 and font.get_string_size(bb.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > room:
+	var shown := bb.atr(bb.text)   # кнопка переводится движком: мерить надо показанный текст, а не ключ
+	while fs > 15 and font.get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > with_icon:
 		fs -= 1
+	var use_icon := icon0 != null and font.get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x <= with_icon
+	if icon0 != null and not use_icon:
+		# не влезает и мелким шрифтом — убираем значок, текст важнее
+		fs = ROW_FONT
+		while fs > 15 and font.get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > base_room:
+			fs -= 1
+	if bb.icon != (icon0 if use_icon else null):
+		bb.icon = icon0 if use_icon else null
 	if bb.get_theme_font_size("font_size") != fs:
 		bb.add_theme_font_size_override("font_size", fs)
+
+
+## «Встряска»: направление каждого шара поворачивается на SHAKE_MIN…SHAKE_MAX градусов в случайную сторону —
+## застрявшие на одной траектории шары сбиваются с неё. Скорость не меняется; бурящие (Клещ) не трогаются.
+func _shake() -> void:
+	if shake_cd > 0.0 or balls.is_empty():
+		return
+	for b in balls:
+		if b.drill_id >= 0 or b.vel.length_squared() <= 1.0:
+			continue
+		var a := deg_to_rad(randf_range(SHAKE_MIN, SHAKE_MAX)) * (1.0 if randf() < 0.5 else -1.0)
+		b.vel = b.vel.rotated(a)
+	shake_cd = SHAKE_CD
+	Sfx.play("launch", 0.0)
+	GameData.vibrate(30)
+	_refresh_ui()
+
+
+## Заливка перезарядки на кнопке: «окно» растущей ширины с плашкой размером с кнопку внутри.
+func _make_cd_fill(btn: Button) -> Array:
+	var clip := Control.new()
+	clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clip.clip_contents = true
+	btn.add_child(clip)
+	var pnl := Panel.new()
+	pnl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clip.add_child(pnl)
+	return [clip, pnl]
+
+
+func _layout_cd_fill(btn: Button, clip: Control, pnl: Panel, done: float) -> void:
+	var sz := btn.size
+	pnl.size = sz
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.45, 0.85, 1.0, 0.3)
+	var base := btn.get_theme_stylebox("disabled")
+	sb.set_corner_radius_all(base.corner_radius_top_left if base is StyleBoxFlat else 12)
+	pnl.add_theme_stylebox_override("panel", sb)
+	clip.position = Vector2.ZERO
+	clip.size = Vector2(sz.x * done, sz.y)
+	clip.visible = done > 0.0
 
 
 ## Перезарядка «Вернуть шар»: доля прошедшего времени — полупрозрачная заливка слева направо.
@@ -3956,7 +4027,10 @@ func _refresh_ui() -> void:
 		lbl_prog.text = tr("Разбито %s") % GameData.fmt(destroyed) + " · " + _pct_text(frac)
 	else:
 		lbl_prog.text = tr("%s из %s") % [GameData.fmt(destroyed), GameData.fmt(goal)] + " · " + _pct_text(frac)
-	btn_snap.text = [tr("любой"), tr("45°"), tr("ключевые")][snap_mode]
+	var snap_txt: String = [tr("любой"), tr("45°"), tr("ключевые")][snap_mode]
+	if btn_snap.text != snap_txt:
+		btn_snap.text = snap_txt
+		_fit_button_text(btn_snap)
 	if frenzy_t > 0.0:
 		frenzy_label.text = tr("Урон ×2 · %d с") % int(ceil(frenzy_t))
 		frenzy_prog.max_value = frenzy_max
@@ -3978,6 +4052,9 @@ func _refresh_ui() -> void:
 	btn_reset.set_pressed_no_signal(reset_armed)
 	btn_reset.disabled = not reset_armed and (cd > 0.0 or int(counts[selected]) == 0)
 	_layout_reset_fill()
+	if btn_shake != null:
+		btn_shake.disabled = shake_cd > 0.0 or balls.is_empty()
+		_layout_cd_fill(btn_shake, shake_fill, shake_fill_panel, 0.0 if shake_cd <= 0.0 else clampf(1.0 - shake_cd / SHAKE_CD, 0.0, 1.0))
 
 	if not upg.visible:
 		return

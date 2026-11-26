@@ -218,6 +218,26 @@ static func arrow_up(sz: int = 40) -> ImageTexture:
 	return _tex(img)
 
 
+## «Встряска»: две волнистые линии — шары меняют траекторию.
+static func shake(sz: int = 40) -> ImageTexture:
+	var img := _img(sz)
+	var w := sz * 0.065
+	for y in sz:
+		for x in sz:
+			var px := x + 0.5
+			var py := y + 0.5
+			var best := 1e9
+			for k in 2:
+				var base := sz * (0.34 + 0.32 * k)
+				if px < sz * 0.1 or px > sz * 0.9:
+					continue
+				var wy := base + sin((px / sz - 0.1) * TAU * 2.0) * sz * 0.055   # две параллельные пологие волны «≈»
+				best = minf(best, absf(py - wy))
+			if best < 1e8:
+				_blend(img, x, y, Color.WHITE, _cov(best - w))
+	return _tex(img)
+
+
 static func refresh(sz: int = 40) -> ImageTexture:
 	var img := _img(sz)
 	var h := sz * 0.5
