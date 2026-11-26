@@ -29,7 +29,6 @@ const T := {
 	"любой": "libero",
 	"45°": "45°",
 	"Разбито %s": "Rotti %s",
-	"%s из %s": "%s di %s",
 	"Вернуться к игре": "Torna al gioco",
 	"  Шарики  ": "  Palline  ",
 	"Урон": "Danno",

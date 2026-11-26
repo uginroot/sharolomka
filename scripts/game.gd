@@ -3251,6 +3251,7 @@ var ic_coin: ImageTexture
 var ic_gem: ImageTexture
 var prog_bar: ProgressBar
 var frenzy_label: Label
+var goal_mark: ColorRect
 var ic_refresh: Texture2D
 var frenzy_bar: Control
 var frenzy_prog: ProgressBar
@@ -3382,6 +3383,11 @@ func _build_ui() -> void:
 	prog_bar.custom_minimum_size.y = 10
 	prog_bar.max_value = 1.0
 	pv.add_child(prog_bar)
+	goal_mark = ColorRect.new()   # отметка цели уровня на полоске прогресса (на больших картах цель < всей карты)
+	goal_mark.color = GameData.C_GOLD
+	goal_mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	goal_mark.visible = false
+	prog_bar.add_child(goal_mark)
 	# кнопка меню — справа (выбор угла переехал вниз)
 	var bmenu := _button("", "", 52, Icons.menu(40))
 	bmenu.custom_minimum_size.x = 56
@@ -4071,6 +4077,16 @@ func _ev_caption(t: String, track: String) -> String:
 	return "%s: %s → %s" % [name, _ev_text(t, track, lv), _ev_text(t, track, lv + 1)]
 
 
+## Отметка цели на полоске прогресса: доля цели от всей карты; на маленьких картах (цель = вся карта) не видна.
+func _place_goal_mark(gf: float) -> void:
+	if goal_mark == null:
+		return
+	goal_mark.visible = gf < 0.995
+	var w := prog_bar.size.x
+	goal_mark.size = Vector2(4, prog_bar.size.y + 8)
+	goal_mark.position = Vector2(clampf(w * gf - 2.0, 0.0, maxf(0.0, w - 4.0)), -4)
+
+
 ## Процент прогресса: вниз (100% — только при полной расчистке), до 10% — с одним знаком.
 static func _pct_text(frac: float) -> String:
 	var p := frac * 100.0
@@ -4169,13 +4185,13 @@ func _refresh_ui() -> void:
 		return
 	lbl_rub.text = GameData.fmt(coins)
 	lbl_u.text = str(run_u)
-	var frac := float(destroyed) / maxf(1.0, float(goal))
-	prog_bar.value = minf(1.0, frac)
-	# числа и проценты: «1.2K из 18.2K · 7%»; после цели на больших картах — «Разбито 350K · 117%» (от цели)
-	if goal_done and not track_all:
-		lbl_prog.text = tr("Разбито %s") % GameData.fmt(destroyed) + " · " + _pct_text(frac)
-	else:
-		lbl_prog.text = tr("%s из %s") % [GameData.fmt(destroyed), GameData.fmt(goal)] + " · " + _pct_text(frac)
+	# прогресс — от всей карты (0…100%, 100% — расчищена целиком); цель — золотая отметка на полоске,
+	# после её выполнения — «✓» перед подписью. Карта без известного числа квадратов — от цели, как раньше.
+	var whole: int = total if full_tracked and total > 0 else goal
+	var frac := minf(1.0, float(destroyed) / maxf(1.0, float(whole)))
+	prog_bar.value = frac
+	lbl_prog.text = ("✓ " if goal_done and whole > goal else "") + tr("Разбито %s") % _pct_text(frac)
+	_place_goal_mark(float(goal) / maxf(1.0, float(whole)))
 	var snap_txt: String = [tr("любой"), tr("45°"), tr("ключевые")][snap_mode]
 	if btn_snap.text != snap_txt:
 		btn_snap.text = snap_txt

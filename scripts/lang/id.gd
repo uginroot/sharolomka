@@ -29,7 +29,6 @@ const T := {
 	"любой": "bebas",
 	"45°": "45°",
 	"Разбито %s": "Hancur %s",
-	"%s из %s": "%s dari %s",
 	"Вернуться к игре": "Kembali ke game",
 	"  Шарики  ": "  Bola  ",
 	"Урон": "Kerusakan",

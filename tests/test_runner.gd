@@ -1882,26 +1882,41 @@ func test_progress_label() -> void:
 	check(gg._pct_text(0.0999) == "9.9%" and gg._pct_text(0.5) == "50%" and gg._pct_text(0.9999) == "99%" and gg._pct_text(1.0) == "100%",
 		"проценты: %s %s %s %s" % [gg._pct_text(0.0999), gg._pct_text(0.5), gg._pct_text(0.9999), gg._pct_text(1.0)])
 	gg.free()
+	# маленькая карта: цель = вся карта, отметка цели не нужна
 	var g = await new_game(2)
-	g.destroyed = 1234
+	g.destroyed = g.total / 2
 	g._refresh_ui()
-	check(g.lbl_prog.text.begins_with("1.2K из ") and g.lbl_prog.text.ends_with("%"), "подпись малой карты: %s" % g.lbl_prog.text)
+	check(g.lbl_prog.text == "Разбито " + g._pct_text(float(g.total / 2) / g.total), "маленькая карта: %s" % g.lbl_prog.text)
+	check(not g.goal_mark.visible, "на маленькой карте отметка цели не нужна")
+	# большая карта: прогресс от всей карты (максимум 100%), цель — отметка на полоске, после цели — «✓»
 	var g2 = await new_game(4)
 	var font: Font = g2.lbl_prog.get_theme_font("font")
 	var fsz: int = g2.lbl_prog.get_theme_font_size("font_size")
 	for code in ["ru", "de", "fr", "vi", "id"]:
 		GameData.lang_choice = code
 		GameData.apply_settings()
-		for st in [[123456, false], [79999, false], [350000, true]]:
+		for st in [[g2.goal / 2, false], [g2.total, true]]:
 			g2.destroyed = st[0]
 			g2.goal_done = st[1]
 			g2._refresh_ui()
 			await get_tree().process_frame
 			var need: float = font.get_string_size(g2.lbl_prog.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
-			check(need <= g2.lbl_prog.size.x + 0.5, "%s: подпись прогресса не помещается: «%s» (%.0f > %.0f)" % [code, g2.lbl_prog.text, need, g2.lbl_prog.size.x])
-	check(g2.lbl_prog.text.ends_with("437%") or "%" in g2.lbl_prog.text, "после цели нет процента: %s" % g2.lbl_prog.text)
+			check(need <= g2.lbl_prog.size.x + 0.5, "%s: подпись прогресса не помещается: «%s»" % [code, g2.lbl_prog.text])
 	GameData.lang_choice = "ru"
 	GameData.apply_settings()
+	g2.goal_done = true
+	g2.destroyed = g2.total * 3 / 4
+	g2._refresh_ui()
+	check(g2.lbl_prog.text == "✓ Разбито " + g2._pct_text(float(g2.total * 3 / 4) / g2.total), "после цели: %s" % g2.lbl_prog.text)
+	g2.destroyed = g2.total
+	g2._refresh_ui()
+	check(g2.lbl_prog.text.ends_with("100%") and g2.prog_bar.value == 1.0, "вся карта: %s" % g2.lbl_prog.text)
+	check(g2.goal_mark.visible and absf(g2.goal_mark.position.x + 2.0 - g2.prog_bar.size.x * float(g2.goal) / g2.total) < 1.5,
+		"отметка цели не на месте: %.1f" % g2.goal_mark.position.x)
+	g2.goal_done = false
+	g2.destroyed = g2.goal / 2
+	g2._refresh_ui()
+	check(not g2.lbl_prog.text.begins_with("✓") and g2.prog_bar.value < float(g2.goal) / g2.total, "до цели: %s" % g2.lbl_prog.text)
 
 
 
