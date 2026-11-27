@@ -3526,7 +3526,7 @@ func _build_ui() -> void:
 	up.add_theme_stylebox_override("panel", ups)
 	upg_margin.add_child(up)
 	var uv := VBoxContainer.new()
-	uv.add_theme_constant_override("separation", 12)
+	uv.add_theme_constant_override("separation", 16)
 	up.add_child(uv)
 	var uh := HBoxContainer.new()
 	uh.add_theme_constant_override("separation", 8)
@@ -3540,7 +3540,7 @@ func _build_ui() -> void:
 	uh.add_child(upg_u.get_parent().get_parent())
 	# вкладки шаров: значок, число шаров, зелёный счётчик того, что можно купить (закрытый — замок и «1 U»)
 	upg_tab_box = HBoxContainer.new()
-	upg_tab_box.add_theme_constant_override("separation", 6)
+	upg_tab_box.add_theme_constant_override("separation", 8)
 	uv.add_child(upg_tab_box)
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -3781,12 +3781,14 @@ func _rebuild_rows() -> void:
 		cv.add_theme_constant_override("separation", 8)
 		card.add_child(cv)
 		_card_head(cv, t, not unlocked)
+		cv.add_theme_constant_override("separation", 6)
 		# описание шара — всегда целиком
 		var sd := _label(tr(def["desc"]), "Muted")
 		sd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		sd.name = "Desc"
 		cv.add_child(sd)
 		if unlocked:
+			_gap(cv)
 			# бонус стаи — полоской: ступень, прогресс до следующей, что даёт сейчас
 			var fr := HBoxContainer.new()
 			fr.add_theme_constant_override("separation", 8)
@@ -3812,14 +3814,18 @@ func _rebuild_rows() -> void:
 			fr.add_child(fb)
 			var fe := _label("", "Muted")
 			fr.add_child(fe)
+			_gap(cv, 4)
 			var st := _stats_panel(cv)
+			_gap(cv)
 			var trs := {}
 			for tr_ in def["tracks"]:
 				trs[tr_["id"]] = _upg_row(cv, tr(TRACK_NAMES.get(tr_["id"], tr_["id"])), ic_coin, _buy_track.bind(t, tr_["id"]))
+				_gap(cv, 4)
 			shop_refs[t] = {"card": card, "fleet": fl, "fleet_bar": fb, "fleet_eff": fe, "tracks": trs,
 				"stat": st["total"], "stat_dps": st["dps"], "stat_ball": st["ball"]}
 			_build_evo_section(cv, t)
 		else:
+			_gap(cv)
 			var ub := _button(tr("Открыть · 1 U"), "AccentButton", 62, ic_gem)
 			ub.pressed.connect(_unlock_type.bind(t))
 			cv.add_child(ub)
@@ -3838,21 +3844,32 @@ static func _arrow(a: String, b: String) -> String:
 	return "%s → %s" % [a, b]
 
 
+## Отступ между смысловыми группами карточки (сетка 4/8 px): внутри группы тесно, между группами — воздух.
+const GAP_GROUP := 14
+
+
+func _gap(parent: Control, h: float = GAP_GROUP) -> void:
+	var c := Control.new()
+	c.custom_minimum_size.y = h
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(c)
+
+
 ## Статистика шара на своей подложке: урон за уровень, урон в секунду (за 60 с), на один шар.
 func _stats_panel(cv: VBoxContainer) -> Dictionary:
 	var pan := PanelContainer.new()
 	var psb := StyleBoxFlat.new()
 	psb.bg_color = Color(0.45, 0.6, 1.0, 0.07)
 	psb.set_corner_radius_all(12)
-	psb.content_margin_left = 12
-	psb.content_margin_right = 12
-	psb.content_margin_top = 6
-	psb.content_margin_bottom = 6
+	psb.content_margin_left = 16
+	psb.content_margin_right = 16
+	psb.content_margin_top = 12
+	psb.content_margin_bottom = 12
 	pan.add_theme_stylebox_override("panel", psb)
 	pan.name = "Stats"
 	cv.add_child(pan)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 2)
+	v.add_theme_constant_override("separation", 8)
 	pan.add_child(v)
 	var out := {}
 	for k in [["total", tr("Урон за уровень")], ["dps", tr("Урон в секунду (за 60 с)")], ["ball", tr("На один шар")]]:
@@ -3909,9 +3926,11 @@ func _upg_row(parent: VBoxContainer, name: String, icon: Texture2D, cb: Callable
 ## Эволюции шара — в его же карточке, под прокачкой за монеты. Купленная: заголовок с ✓ и строки веток
 ## (значение и кнопка ◆), некупленная: название, короткое описание и кнопка ◆ цены.
 func _build_evo_section(cv: VBoxContainer, t: String) -> void:
+	_gap(cv, GAP_GROUP - 4)
 	var hd := _label(tr("  Эволюции  ").strip_edges(), "Muted")
 	hd.add_theme_font_override("font", GameData.font_bold)
 	cv.add_child(hd)
+	_gap(cv, 2)
 	var refs := {}
 	for e in GameData.EVOS[t]:
 		var eid: String = e["id"]
@@ -3922,15 +3941,15 @@ func _build_evo_section(cv: VBoxContainer, t: String) -> void:
 		psb.border_color = Color(1, 1, 1, 0.08)
 		psb.set_border_width_all(1)
 		psb.set_corner_radius_all(12)
-		psb.content_margin_left = 12
-		psb.content_margin_right = 10
-		psb.content_margin_top = 8
-		psb.content_margin_bottom = 8
+		psb.content_margin_left = 16
+		psb.content_margin_right = 14
+		psb.content_margin_top = 14
+		psb.content_margin_bottom = 14
 		pan.add_theme_stylebox_override("panel", psb)
 		pan.name = "Evo_" + eid
 		cv.add_child(pan)
 		var ev := VBoxContainer.new()
-		ev.add_theme_constant_override("separation", 6)
+		ev.add_theme_constant_override("separation", 10)
 		pan.add_child(ev)
 		if not _has_evo(t, eid):
 			var row := HBoxContainer.new()
@@ -3938,7 +3957,7 @@ func _build_evo_section(cv: VBoxContainer, t: String) -> void:
 			ev.add_child(row)
 			var tv := VBoxContainer.new()
 			tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			tv.add_theme_constant_override("separation", 2)
+			tv.add_theme_constant_override("separation", 4)
 			row.add_child(tv)
 			var nm := _label(tr(e["name"]), "")
 			nm.add_theme_font_override("font", GameData.font_bold)
@@ -3966,6 +3985,7 @@ func _build_evo_section(cv: VBoxContainer, t: String) -> void:
 		for tr_ in e["tracks"]:
 			ladders[tr_["id"]] = _upg_row(ev, tr(tr_["name"]), ic_gem, _buy_ladder.bind(t, tr_["id"]))
 		refs[eid] = {"ladders": ladders}
+		_gap(cv, 4)
 	evo_refs[t] = refs
 
 

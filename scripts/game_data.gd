@@ -655,10 +655,10 @@ func make_theme() -> Theme:
 	th.set_stylebox("panel", "PanelContainer", _sb(Color(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.88), 0))
 	th.set_type_variation("Card", "PanelContainer")
 	var card := _sb(C_CARD, 18, Color(1, 1, 1, 0.06), 1, 4)
-	card.content_margin_left = 16
-	card.content_margin_right = 16
-	card.content_margin_top = 14
-	card.content_margin_bottom = 14
+	card.content_margin_left = 20     # «воздух» (v0.53): просторные поля карточек
+	card.content_margin_right = 20
+	card.content_margin_top = 18
+	card.content_margin_bottom = 20
 	th.set_stylebox("panel", "Card", card)
 	th.set_type_variation("Pill", "PanelContainer")
 	var pill := _sb(Color(0, 0, 0, 0.3), 20, Color(1, 1, 1, 0.07), 1, 0)
@@ -671,6 +671,7 @@ func make_theme() -> Theme:
 	th.set_type_variation("Muted", "Label")
 	th.set_color("font_color", "Muted", C_MUTED)
 	th.set_font_size("font_size", "Muted", 21)
+	th.set_constant("line_spacing", "Muted", 4)   # описания в несколько строк читаются легче
 	th.set_type_variation("Title", "Label")
 	th.set_font("font", "Title", font_bold)
 	th.set_font_size("font_size", "Title", 29)

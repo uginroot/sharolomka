@@ -234,12 +234,13 @@ func _fill_legacy() -> void:
 	intro.theme_type_variation = "Muted"
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	legacy_box.add_child(intro)
+	legacy_box.add_theme_constant_override("separation", 20)   # «воздух» между ветками
 	for br in GameData.META_BRANCHES:
 		var card := PanelContainer.new()
 		card.theme_type_variation = "Card"
 		legacy_box.add_child(card)
 		var v := VBoxContainer.new()
-		v.add_theme_constant_override("separation", 8)
+		v.add_theme_constant_override("separation", 12)
 		card.add_child(v)
 		var bt := Label.new()
 		bt.text = tr(br)
@@ -249,6 +250,9 @@ func _fill_legacy() -> void:
 		bd.text = tr(GameData.META_BRANCH_DESC[br])
 		bd.theme_type_variation = "Muted"
 		v.add_child(bd)
+		var sp := Control.new()
+		sp.custom_minimum_size.y = 2
+		v.add_child(sp)
 		for md in GameData.META:
 			if md["branch"] == br:
 				v.add_child(_meta_panel(md))
@@ -269,15 +273,15 @@ func _meta_panel(md: Dictionary) -> Control:
 	psb.border_color = Color(0.55, 0.9, 0.65, 0.35) if lv > 0 else Color(1, 1, 1, 0.08)
 	psb.set_border_width_all(1)
 	psb.set_corner_radius_all(12)
-	psb.content_margin_left = 12
-	psb.content_margin_right = 10
-	psb.content_margin_top = 8
-	psb.content_margin_bottom = 8
+	psb.content_margin_left = 16
+	psb.content_margin_right = 14
+	psb.content_margin_top = 14
+	psb.content_margin_bottom = 14
 	pan.add_theme_stylebox_override("panel", psb)
 	pan.name = "Meta_" + id
 	wrap.add_child(pan)
 	var ev := VBoxContainer.new()
-	ev.add_theme_constant_override("separation", 4)
+	ev.add_theme_constant_override("separation", 8)
 	pan.add_child(ev)
 	var top := HBoxContainer.new()
 	ev.add_child(top)
